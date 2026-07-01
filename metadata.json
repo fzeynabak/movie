@@ -1,0 +1,8 @@
+{
+  "name": "نرم‌افزار حسابداری",
+  "description": "نرم‌افزار حسابداری با رابط کاربری راست‌چین (فارسی) با استفاده از Electron، React و Vite",
+  "requestFramePermissions": [],
+  "majorCapabilities": [
+    "MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"
+  ]
+}

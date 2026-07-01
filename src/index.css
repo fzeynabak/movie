@@ -1,0 +1,91 @@
+@import url("https://cdn.jsdelivr.net/gh/rastikerdar/vazirmatn@v33.003/Vazirmatn-font-face.css");
+@import "tailwindcss";
+
+@theme {
+  --font-sans: "Vazirmatn", ui-sans-serif, system-ui, sans-serif;
+}
+
+@variant dark (&:where(.dark, .dark *));
+
+body {
+  font-family: var(--font-sans);
+  background-color: rgb(248, 250, 252);
+  color: rgb(15, 23, 42);
+  transition-property: color, background-color, border-color, text-decoration-color, fill, stroke;
+  transition-timing-function: cubic-bezier(0.4, 0, 0.2, 1);
+  transition-duration: 200ms;
+}
+
+.dark body {
+  background-color: rgb(9, 15, 26);
+  color: rgb(248, 250, 252);
+}
+
+/* Hide number input spinners */
+.no-spinners::-webkit-outer-spin-button,
+.no-spinners::-webkit-inner-spin-button {
+  -webkit-appearance: none;
+  margin: 0;
+}
+.no-spinners {
+  -moz-appearance: textfield;
+}
+
+/* Print styles for perfect, margin-free high-fidelity official receipts/invoices */
+@media print {
+  /* Hide the entire React virtual DOM root and other non-print elements */
+  #root, .no-print, [role="dialog"], .fixed, .absolute, button, nav, header {
+    display: none !important;
+  }
+
+  /* Make sure body and html are neutral and don't restrict size */
+  html, body {
+    width: 100% !important;
+    height: auto !important;
+    margin: 0 !important;
+    padding: 0 !important;
+    background: #ffffff !important;
+    color: #000000 !important;
+    overflow: visible !important;
+  }
+
+  /* Force print background colors and shadows */
+  * {
+    -webkit-print-color-adjust: exact !important;
+    print-color-adjust: exact !important;
+  }
+
+  /* Set up the container for the cloned invoice at the document body level */
+  #print-temp-container {
+    display: block !important;
+    position: absolute !important;
+    left: 0 !important;
+    top: 0 !important;
+    width: 100% !important;
+    height: auto !important;
+    margin: 0 !important;
+    padding: 0 !important;
+    background: #ffffff !important;
+    box-shadow: none !important;
+    border: none !important;
+    visibility: visible !important;
+  }
+
+  #print-temp-container * {
+    visibility: visible !important;
+  }
+
+  /* Reset layout properties specifically within the printed target */
+  #print-temp-container > div {
+    margin: 0 auto !important;
+    box-shadow: none !important;
+    border: none !important;
+    page-break-inside: avoid !important;
+  }
+}
+
+/* Screen styles for the temporary printing container (must be completely hidden) */
+#print-temp-container {
+  display: none !important;
+}
+
