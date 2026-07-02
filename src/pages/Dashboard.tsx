@@ -1,910 +1,1090 @@
-import React from 'react';
-import { useNavigate } from 'react-router-dom';
+/**
+ * @license
+ * SPDX-License-Identifier: Apache-2.0
+ */
+
+import { useState, useEffect } from 'react';
+import { dbService } from '../db/databaseService';
+import { Movie, Series, Sale, getSafePosterUrl } from '../types';
 import { 
-  Users, 
-  Package, 
-  ShoppingCart, 
+  Film, 
+  Tv, 
+  TrendingUp, 
+  CreditCard, 
   DollarSign, 
-  Coins, 
-  AlertTriangle,
-  ArrowDownCircle,
-  UserPlus,
-  FolderPlus,
-  TrendingDown,
-  ArrowDownLeft,
-  ArrowUpRight,
-  ShieldAlert,
-  Clock,
-  Sparkles,
+  ArrowUpRight, 
+  Clock, 
+  Award,
   ChevronLeft,
   ChevronRight,
-  Flame,
-  Award,
-  AlertCircle,
-  TrendingUp,
+  Play,
+  FolderOpen,
+  Bell,
   Calendar,
-  CheckCircle2
+  AlertCircle,
+  Sparkles,
+  Info,
+  Globe
 } from 'lucide-react';
-import { 
-  LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer,
-  PieChart, Pie, Cell, Legend
-} from 'recharts';
-import JalaliDatePicker, { 
-  gregorianToJalali, 
-  getTodayJalali, 
-  toPersianDigits 
-} from '../components/JalaliDatePicker';
 
-// Solid date parser helper for dynamic Gregorian-to-Jalali conversions
-function parseToJalali(dateStr: string): { y: number; m: number; d: number } {
-  if (!dateStr) {
-    const now = new Date();
-    return gregorianToJalali(now.getFullYear(), now.getMonth() + 1, now.getDate());
-  }
-
-  // Check if already Jalali format "14xx/xx/xx"
-  const shamsiRegex = /^(\d{4})[/\-](\d{1,2})[/\-](\d{1,2})/;
-  const match = dateStr.match(shamsiRegex);
-  if (match) {
-    const y = parseInt(match[1]);
-    const m = parseInt(match[2]);
-    const d = parseInt(match[3]);
-    if (y >= 1300 && y <= 1500) {
-      return { y, m, d };
-    }
-  }
-
-  // Try parsing as standard Gregorian date
-  try {
-    const dateObj = new Date(dateStr);
-    if (!isNaN(dateObj.getTime())) {
-      return gregorianToJalali(
-        dateObj.getFullYear(),
-        dateObj.getMonth() + 1,
-        dateObj.getDate()
-      );
-    }
-  } catch (e) {
-    console.error('Error parsing date:', dateStr, e);
-  }
-
-  const now = new Date();
-  return gregorianToJalali(now.getFullYear(), now.getMonth() + 1, now.getDate());
+interface MonthData {
+  name: string;
+  amount: number;
 }
 
-const getJalaliComparable = (jDate: { y: number; m: number; d: number }) => {
-  return jDate.y * 10000 + jDate.m * 100 + jDate.d;
-};
+// Helper to convert English numerals to Persian numerals
+export function toPersianNums(num: number | string): string {
+  if (num === undefined || num === null) return '';
+  const farsiDigits = ['۰', '۱', '۲', '۳', '۴', '۵', '۶', '۷', '۸', '۹'];
+  return num
+    .toString()
+    .replace(/[0-9]/g, (w) => farsiDigits[parseInt(w, 10)]);
+}
 
-export default function Dashboard() {
-  const navigate = useNavigate();
-  const [data, setData] = React.useState<any>(null);
-  const [loading, setLoading] = React.useState(true);
+// Convert numbers with thousands separator
+export function formatCurrency(num: number): string {
+  const formatted = num.toString().replace(/\B(?=(\d{3})+(?!\d))/g, ',');
+  return toPersianNums(formatted) + ' تومان';
+}
 
-  // Period-based stats state
-  const [activePeriod, setActivePeriod] = React.useState<'today' | 'week' | 'month' | 'custom'>('today');
-  const [customFromDate, setCustomFromDate] = React.useState('');
-  const [customToDate, setCustomToDate] = React.useState('');
+export interface ScheduledStatus {
+  show: boolean;
+  status: 'none' | 'upcoming' | 'airing' | 'past';
+  targetDate: Date | null;
+  diffMs: number;
+}
 
-  // Carousel ref and scroll controllers
-  const carouselRef = React.useRef<HTMLDivElement>(null);
+export function getScheduledSeriesStatus(s: Series): ScheduledStatus {
+  if (!s.releaseDay || !s.releaseTime) return { show: false, status: 'none', targetDate: null, diffMs: 0 };
 
-  React.useEffect(() => {
-    // Populate date defaults
-    const today = getTodayJalali();
-    const startOfMonthStr = `${today.y}/${String(today.m).padStart(2, '0')}/۰۱`;
-    const todayStr = `${today.y}/${String(today.m).padStart(2, '0')}/${String(today.d).padStart(2, '0')}`;
-    setCustomFromDate(startOfMonthStr);
-    setCustomToDate(todayStr);
-
-    fetchDashboardData();
-  }, []);
-
-  const fetchDashboardData = async () => {
-    setLoading(true);
-    try {
-      if (window.electronAPI?.getDashboardData) {
-        const res = await window.electronAPI.getDashboardData();
-        if (res && res.success) {
-          setData(res);
-        } else {
-          console.error('Failed to load dashboard data:', res?.error);
-        }
-      }
-    } catch (e) {
-      console.error('Error fetching dashboard data:', e);
-    } finally {
-      setLoading(false);
-    }
+  const dayMap: Record<string, number> = {
+    'یکشنبه': 0, 'دوشنبه': 1, 'سه‌شنبه': 2, 'چهارشنبه': 3, 'پنجشنبه': 4, 'جمعه': 5, 'شنبه': 6
   };
+  const targetDayNum = dayMap[s.releaseDay];
+  if (targetDayNum === undefined) return { show: false, status: 'none', targetDate: null, diffMs: 0 };
 
-  const formatCurrency = (val: number | string) => {
-    const num = parseFloat(String(val)) || 0;
-    return num.toLocaleString('fa-IR');
-  };
+  const now = new Date();
+  const currentDayNum = now.getDay();
 
-  // 1. Calculations for multi-period sales and profit from REAL invoices
-  const periodStats = React.useMemo(() => {
-    if (!data?.allInvoicesForCalculations) {
-      return { sales: 0, profit: 0, count: 0, avg: 0 };
-    }
+  // Find the target day of THIS week
+  let dayDelta = targetDayNum - currentDayNum;
+  
+  const targetThisWeek = new Date(now);
+  targetThisWeek.setDate(now.getDate() + dayDelta);
+  
+  let targetHour = 20;
+  let targetMinute = 0;
+  const parts = s.releaseTime.split(':');
+  if (parts.length >= 2) {
+    targetHour = parseInt(parts[0], 10) || 20;
+    targetMinute = parseInt(parts[1], 10) || 0;
+  }
+  targetThisWeek.setHours(targetHour, targetMinute, 0, 0);
 
-    const invoices = data.allInvoicesForCalculations.filter(
-      (inv: any) => inv.type === 'فروش' || inv.type === null
-    );
-    const todayJalali = getTodayJalali();
-    const todayVal = getJalaliComparable(todayJalali);
+  const nowMs = now.getTime();
+  const targetMs = targetThisWeek.getTime();
+  const twoHoursMs = 2 * 60 * 60 * 1000;
 
-    // Saturday-based current week calculation
-    const now = new Date();
-    const currentDayOfWeek = now.getDay(); // 0: Sunday, ..., 6: Saturday
-    const daysToSubtract = currentDayOfWeek === 6 ? 0 : (currentDayOfWeek + 1);
-    const saturdayDate = new Date(now);
-    saturdayDate.setDate(now.getDate() - daysToSubtract);
-    saturdayDate.setHours(0, 0, 0, 0);
-
-    const processedInvoices = invoices.map((inv: any) => {
-      const jDate = parseToJalali(inv.date);
-      const jalaliVal = getJalaliComparable(jDate);
-      const gregTime = new Date(inv.date).getTime();
-      return { 
-        jalaliVal, 
-        gregTime, 
-        jDate, 
-        final_amount: inv.final_amount || 0, 
-        profit: inv.profit || 0 
-      };
-    });
-
-    let filtered = [];
-
-    if (activePeriod === 'today') {
-      filtered = processedInvoices.filter(p => p.jalaliVal === todayVal);
-    } else if (activePeriod === 'week') {
-      filtered = processedInvoices.filter(p => p.gregTime >= saturdayDate.getTime());
-    } else if (activePeriod === 'month') {
-      filtered = processedInvoices.filter(p => p.jDate.y === todayJalali.y && p.jDate.m === todayJalali.m);
-    } else if (activePeriod === 'custom') {
-      let fromVal = 0;
-      let toVal = 99999999;
-      
-      const cleanFrom = customFromDate ? customFromDate.replace(/[۰-۹]/g, d => '۰۱۲۳۴۵۶۷۸۹'.indexOf(d).toString()) : '';
-      const cleanTo = customToDate ? customToDate.replace(/[۰-۹]/g, d => '۰۱۲۳۴۵۶۷۸۹'.indexOf(d).toString()) : '';
-
-      if (cleanFrom) {
-        const parts = cleanFrom.split('/');
-        fromVal = parseInt(parts[0]) * 10000 + parseInt(parts[1]) * 100 + parseInt(parts[2] || '1');
-      }
-      if (cleanTo) {
-        const parts = cleanTo.split('/');
-        toVal = parseInt(parts[0]) * 10000 + parseInt(parts[1]) * 100 + parseInt(parts[2] || '31');
-      }
-
-      filtered = processedInvoices.filter(p => p.jalaliVal >= fromVal && p.jalaliVal <= toVal);
-    }
-
-    const totalSales = filtered.reduce((sum, inv) => sum + inv.final_amount, 0);
-    const totalProfit = filtered.reduce((sum, inv) => sum + inv.profit, 0);
-    const count = filtered.length;
-    const avg = count > 0 ? Math.round(totalSales / count) : 0;
+  if (targetMs > nowMs) {
+    // Upcoming this week
+    return {
+      show: true,
+      status: 'upcoming',
+      targetDate: targetThisWeek,
+      diffMs: targetMs - nowMs
+    };
+  } else if (nowMs <= targetMs + twoHoursMs) {
+    // Airing/Released right now (within 2-hour window)
+    return {
+      show: true,
+      status: 'airing',
+      targetDate: targetThisWeek,
+      diffMs: targetMs - nowMs
+    };
+  } else {
+    // Past this week, check if next week's occurrence is near (within 5 days before)
+    const nextWeekTarget = new Date(targetThisWeek);
+    nextWeekTarget.setDate(nextWeekTarget.getDate() + 7);
+    const diffNextWeekMs = nextWeekTarget.getTime() - nowMs;
+    const fiveDaysMs = 5 * 24 * 60 * 60 * 1000;
 
     return {
-      sales: totalSales,
-      profit: totalProfit,
-      count,
-      avg
+      show: diffNextWeekMs < fiveDaysMs,
+      status: 'upcoming',
+      targetDate: nextWeekTarget,
+      diffMs: diffNextWeekMs
     };
-  }, [data, activePeriod, customFromDate, customToDate]);
-
-  // 2. Real sales and expenses chart data (grouped by Jalali Month for last 6 months)
-  const realSalesData = React.useMemo(() => {
-    if (!data?.allInvoicesForCalculations) return [];
-    
-    const MONTH_NAMES = [
-      'فروردین', 'اردیبهشت', 'خرداد', 'تیر', 'مرداد', 'شهریور',
-      'مهر', 'آبان', 'آذر', 'دی', 'بهمن', 'اسفند'
-    ];
-
-    const currentJalali = getTodayJalali();
-    const monthsList: any[] = [];
-    
-    // Generate dynamic list of last 6 Jalali months
-    for (let i = 5; i >= 0; i--) {
-      let m = currentJalali.m - i;
-      let y = currentJalali.y;
-      if (m <= 0) {
-        m += 12;
-        y -= 1;
-      }
-      monthsList.push({
-        year: y,
-        month: m,
-        name: `${MONTH_NAMES[m - 1]} ${toPersianDigits(y % 100)}`,
-        sales: 0,
-        expenses: 0
-      });
-    }
-
-    // Distribute actual transaction sums
-    data.allInvoicesForCalculations.forEach((inv: any) => {
-      const jDate = parseToJalali(inv.date);
-      const match = monthsList.find(m => m.year === jDate.y && m.month === jDate.m);
-      if (match) {
-        if (inv.type === 'خرید') {
-          match.expenses += inv.final_amount || 0;
-        } else {
-          match.sales += inv.final_amount || 0;
-        }
-      }
-    });
-
-    return monthsList;
-  }, [data]);
-
-  // 3. Dynamic Category Pie Chart data
-  const realPieData = React.useMemo(() => {
-    if (!data?.categorySales || data.categorySales.length === 0) {
-      return [
-        { name: 'فروش مستقیم کالا', value: 1 }
-      ];
-    }
-    return data.categorySales.map((item: any) => ({
-      name: item.name,
-      value: item.value
-    }));
-  }, [data]);
-
-  const COLORS = ['#6366f1', '#10b981', '#f59e0b', '#ef4444', '#8b5cf6', '#ec4899', '#06b6d4'];
-
-  // 4. Products out-of-stock and low-stock filtration
-  const stockAlerts = React.useMemo(() => {
-    if (!data?.allProducts) return { outOfStock: [], lowStock: [] };
-    
-    const outOfStock = data.allProducts.filter((p: any) => (p.total_stock || 0) <= 0);
-    const lowStock = data.allProducts.filter((p: any) => 
-      (p.total_stock || 0) > 0 && (p.total_stock || 0) <= Math.max(1, p.min_stock || 5)
-    );
-
-    return { outOfStock, lowStock };
-  }, [data]);
-
-  const stats = [
-    { 
-      label: 'مشتریان فعال', 
-      value: (data?.customersCount || 0).toLocaleString('fa-IR'), 
-      icon: Users, 
-      color: 'text-blue-600 dark:text-blue-400', 
-      bg: 'bg-blue-100 dark:bg-blue-900/40' 
-    },
-    { 
-      label: 'کل محصولات', 
-      value: (data?.productsCount || 0).toLocaleString('fa-IR'), 
-      icon: Package, 
-      color: 'text-indigo-600 dark:text-indigo-400', 
-      bg: 'bg-indigo-100 dark:bg-indigo-900/40' 
-    },
-    { 
-      label: 'فاکتورهای امروز', 
-      value: (data?.todayInvoicesCount || 0).toLocaleString('fa-IR'), 
-      icon: ShoppingCart, 
-      color: 'text-emerald-600 dark:text-emerald-400', 
-      bg: 'bg-emerald-100 dark:bg-emerald-900/40' 
-    },
-    { 
-      label: 'فروش امروز (ریال)', 
-      value: formatCurrency(data?.todaySales || 0), 
-      icon: DollarSign, 
-      color: 'text-amber-600 dark:text-amber-400', 
-      bg: 'bg-amber-100 dark:bg-amber-900/40' 
-    },
-    { 
-      label: 'سود امروز (ریال)', 
-      value: formatCurrency(data?.todayProfit || 0), 
-      icon: Coins, 
-      color: 'text-teal-600 dark:text-teal-400', 
-      bg: 'bg-teal-100 dark:bg-teal-900/40' 
-    },
-    { 
-      label: 'کالاهای کم موجودی', 
-      value: (data?.lowStockCount || 0).toLocaleString('fa-IR'), 
-      icon: AlertTriangle, 
-      color: 'text-rose-600 dark:text-rose-400', 
-      bg: 'bg-rose-100 dark:bg-rose-900/40' 
-    },
-    { 
-      label: 'کل طلبکاران (طلب ما)', 
-      value: formatCurrency(data?.totalDebtorsSum || 0), 
-      icon: ArrowDownLeft, 
-      color: 'text-cyan-600 dark:text-cyan-400', 
-      bg: 'bg-cyan-100 dark:bg-cyan-900/40' 
-    },
-    { 
-      label: 'کل بدهکاران (بدهی ما)', 
-      value: formatCurrency(data?.totalCreditorsSum || 0), 
-      icon: ArrowUpRight, 
-      color: 'text-orange-600 dark:text-orange-400', 
-      bg: 'bg-orange-100 dark:bg-orange-900/40' 
-    },
-  ];
-
-  const quickActions = [
-    { label: 'ثبت فروش جدید', path: '/sales/new-invoice', icon: ShoppingCart, color: 'text-indigo-600 dark:text-indigo-400 bg-indigo-50 hover:bg-indigo-100 dark:bg-indigo-950/30 dark:hover:bg-indigo-900/40' },
-    { label: 'ثبت خرید جدید', path: '/inventory/control', icon: ArrowDownCircle, color: 'text-emerald-600 dark:text-emerald-400 bg-emerald-50 hover:bg-emerald-100 dark:bg-emerald-950/30 dark:hover:bg-emerald-900/40' },
-    { label: 'افزودن مشتری', path: '/persons/new', icon: UserPlus, color: 'text-blue-600 dark:text-blue-400 bg-blue-50 hover:bg-blue-100 dark:bg-blue-950/30 dark:hover:bg-blue-900/40' },
-    { label: 'افزودن محصول', path: '/products/new', icon: FolderPlus, color: 'text-purple-600 dark:text-purple-400 bg-purple-50 hover:bg-purple-100 dark:bg-purple-950/30 dark:hover:bg-purple-900/40' },
-    { label: 'مدیریت بدهی/طلبی', path: '/persons/debtors-creditors', icon: TrendingDown, color: 'text-amber-600 dark:text-amber-400 bg-amber-50 hover:bg-amber-100 dark:bg-amber-950/30 dark:hover:bg-amber-900/40' },
-    { label: 'لیست اشخاص', path: '/persons/list', icon: Users, color: 'text-teal-600 dark:text-teal-400 bg-teal-50 hover:bg-teal-100 dark:bg-teal-950/30 dark:hover:bg-teal-900/40' },
-    { label: 'تاریخچه فروش', path: '/sales/history', icon: Clock, color: 'text-rose-600 dark:text-rose-400 bg-rose-50 hover:bg-rose-100 dark:bg-rose-950/30 dark:hover:bg-rose-900/40' },
-  ];
-
-  const recentTransactions = React.useMemo(() => {
-    if (!data) return [];
-    const txs: any[] = [];
-
-    (data.recentInvoices || []).forEach((inv: any) => {
-      txs.push({
-        id: `inv-${inv.id}`,
-        rawDate: inv.date,
-        date: inv.date ? parseToJalali(inv.date) : null,
-        type: inv.type === 'خرید' ? 'خرید کالا' : 'فروش کالا',
-        typeColor: inv.type === 'خرید' 
-          ? 'bg-amber-50 text-amber-600 dark:bg-amber-950/30 dark:text-amber-400 border border-amber-100/50 dark:border-amber-900/20'
-          : 'bg-emerald-50 text-emerald-600 dark:bg-emerald-950/30 dark:text-emerald-400 border border-emerald-100/50 dark:border-emerald-900/20',
-        person: inv.customer_name || 'مشتری عمومی',
-        amount: inv.final_amount,
-        status: inv.status || 'تسویه نشده',
-        statusColor: inv.status === 'پرداخت شده'
-          ? 'bg-emerald-100/70 dark:bg-emerald-950/40 text-emerald-700 dark:text-emerald-400'
-          : 'bg-amber-100/70 dark:bg-amber-950/40 text-amber-700 dark:text-amber-400'
-      });
-    });
-
-    (data.recentLedger || []).forEach((led: any) => {
-      let label = 'تراکنش مالی';
-      let typeColor = 'bg-blue-50 text-blue-600 dark:bg-blue-950/30 dark:text-blue-400 border border-blue-100/50 dark:border-blue-900/20';
-      if (led.type === 'received') {
-        label = 'دریافت وجه';
-        typeColor = 'bg-teal-50 text-teal-600 dark:bg-teal-950/30 dark:text-teal-400 border border-teal-100/50 dark:border-teal-900/20';
-      } else if (led.type === 'paid') {
-        label = 'پرداخت وجه';
-        typeColor = 'bg-rose-50 text-rose-600 dark:bg-rose-950/30 dark:text-rose-400 border border-rose-100/50 dark:border-rose-900/20';
-      } else if (led.type === 'adjustment') {
-        label = 'تعدیل حساب';
-        typeColor = 'bg-slate-100 text-slate-600 dark:bg-slate-800 dark:text-slate-400 border border-slate-200 dark:border-slate-700';
-      }
-
-      txs.push({
-        id: `led-${led.id}`,
-        rawDate: led.date || led.created_at,
-        date: (led.date || led.created_at) ? parseToJalali(led.date || led.created_at) : null,
-        type: label,
-        typeColor: typeColor,
-        person: led.person_name || 'شخص عمومی',
-        amount: Math.abs(led.amount),
-        status: 'ثبت شده',
-        statusColor: 'bg-slate-100 dark:bg-slate-800/60 text-slate-600 dark:text-slate-300'
-      });
-    });
-
-    return txs
-      .sort((a, b) => new Date(b.rawDate).getTime() - new Date(a.rawDate).getTime())
-      .slice(0, 6);
-  }, [data]);
-
-  const handleCarouselScroll = (direction: 'right' | 'left') => {
-    if (carouselRef.current) {
-      const container = carouselRef.current;
-      const scrollAmount = 300; 
-      container.scrollBy({
-        left: direction === 'right' ? scrollAmount : -scrollAmount,
-        behavior: 'smooth'
-      });
-    }
-  };
-
-  const CustomTooltip = ({ active, payload, label }: any) => {
-    if (active && payload && payload.length) {
-      return (
-        <div className="bg-white/90 dark:bg-slate-800/90 backdrop-blur-md p-3 rounded-lg shadow-xl border border-slate-100 dark:border-slate-700 text-sm dir-rtl text-right">
-          <p className="font-bold text-slate-800 dark:text-slate-200 mb-2">{label}</p>
-          {payload.map((entry: any, index: number) => (
-            <p key={index} className="flex justify-between gap-4 font-bold" style={{ color: entry.color }}>
-              <span>{entry.name}:</span>
-              <span className="font-mono">{entry.value.toLocaleString('fa-IR')} ریال</span>
-            </p>
-          ))}
-        </div>
-      );
-    }
-    return null;
-  };
-
-  if (loading) {
-    return (
-      <div className="flex flex-col items-center justify-center min-h-[400px] gap-3" dir="rtl">
-        <div className="w-10 h-10 border-4 border-indigo-500 border-t-transparent rounded-full animate-spin"></div>
-        <p className="text-xs font-bold text-slate-500 dark:text-slate-400">در حال بارگذاری داده‌های واقعی داشبورد حسابداری...</p>
-      </div>
-    );
   }
+}
+
+interface TimerCountdownProps {
+  targetDate: Date;
+  s: Series;
+  status: 'none' | 'upcoming' | 'airing' | 'past';
+  onViewMedia: (type: 'movie' | 'series', id: string) => void;
+}
+
+export function TimerCountdown({ targetDate, s, status, onViewMedia }: TimerCountdownProps) {
+  const [timeLeft, setTimeLeft] = useState<{ hours: number; minutes: number; seconds: number; isOver: boolean }>({ hours: 0, minutes: 0, seconds: 0, isOver: false });
+
+  useEffect(() => {
+    const calculate = () => {
+      const now = new Date().getTime();
+      const target = targetDate.getTime();
+      const diff = target - now;
+
+      if (diff <= 0) {
+        if (status === 'airing') {
+          setTimeLeft({ hours: 0, minutes: 0, seconds: 0, isOver: true });
+        } else {
+          setTimeLeft({ hours: 0, minutes: 0, seconds: 0, isOver: true });
+        }
+      } else {
+        const totalSecs = Math.floor(diff / 1000);
+        const hours = Math.floor(totalSecs / 3600);
+        const minutes = Math.floor((totalSecs % 3600) / 60);
+        const seconds = totalSecs % 60;
+        setTimeLeft({ hours, minutes, seconds, isOver: false });
+      }
+    };
+
+    calculate();
+    const interval = setInterval(calculate, 1000);
+    return () => clearInterval(interval);
+  }, [targetDate, status]);
+
+  const isAiringNow = status === 'airing' || timeLeft.isOver;
 
   return (
-    <div className="space-y-6 text-right select-none" dir="rtl" id="dashboard-main-container">
-      {/* Title Header */}
-      <div className="flex flex-col md:flex-row justify-between items-start md:items-center gap-4">
+    <div className="space-y-4 pt-1.5 font-sans">
+      <div className="p-4 bg-slate-950/80 border border-slate-800/80 rounded-2xl shadow-inner md:max-w-md space-y-4">
+        {isAiringNow ? (
+          <div className="flex flex-col items-center justify-center py-2 space-y-2 animate-pulse text-center">
+            <span className="flex h-3 w-3 relative">
+              <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-emerald-400 opacity-75"></span>
+              <span className="relative inline-flex rounded-full h-3 w-3 bg-emerald-500"></span>
+            </span>
+            <span className="text-xs font-black text-emerald-400">هم‌اکنون در حال پخش یا تازه منتشر شده! 🍿</span>
+            <span className="text-[10px] text-gray-400">تا ۲ ساعت دیگر در این جدول برجسته باقی می‌ماند</span>
+          </div>
+        ) : (
+          <div className="space-y-3">
+            <div className="flex items-center gap-1.5 justify-start">
+              <span className="h-2 w-2 rounded-full bg-amber-500 animate-pulse" />
+              <span className="text-[11px] font-black text-amber-500 block">زمان باقی‌مانده تا شروع اکران:</span>
+            </div>
+            
+            {/* Countdown layout panels */}
+            <div className="grid grid-cols-3 gap-3 text-center" dir="ltr">
+              <div className="bg-slate-900/90 border border-amber-505/20 rounded-xl p-2.5 relative overflow-hidden">
+                <span className="text-xl md:text-2xl font-black font-mono text-amber-400 block tracking-wider tabular-nums">
+                  {String(timeLeft.seconds).padStart(2, '0').split('').map(toPersianNums).join('')}
+                </span>
+                <span className="text-[9.5px] text-gray-400 font-bold block mt-1">ثانیه</span>
+              </div>
+              <div className="bg-slate-900/90 border border-indigo-501/20 rounded-xl p-2.5 relative overflow-hidden">
+                <span className="text-xl md:text-2xl font-black font-mono text-indigo-400 block tracking-wider tabular-nums">
+                  {String(timeLeft.minutes).padStart(2, '0').split('').map(toPersianNums).join('')}
+                </span>
+                <span className="text-[9.5px] text-gray-400 font-bold block mt-1">دقیقه</span>
+              </div>
+              <div className="bg-slate-900/90 border border-indigo-500/20 rounded-xl p-2.5 relative overflow-hidden">
+                <span className="text-xl md:text-2xl font-black font-mono text-indigo-400 block tracking-wider tabular-nums">
+                  {toPersianNums(timeLeft.hours)}
+                </span>
+                <span className="text-[9.5px] text-gray-400 font-bold block mt-1">ساعت</span>
+              </div>
+            </div>
+
+            {/* Inline Text Counter Display */}
+            <p className="text-center text-[10.5px] font-bold text-gray-300 pt-1 border-t border-slate-900/60" dir="rtl">
+              {toPersianNums(timeLeft.hours)} ساعت و {toPersianNums(timeLeft.minutes)} دقیقه و {toPersianNums(timeLeft.seconds)} ثانیه مانده به پخش
+            </p>
+          </div>
+        )}
+      </div>
+    </div>
+  );
+}
+
+export default function Dashboard({ onViewMedia }: { onViewMedia: (type: 'movie' | 'series', id: string) => void }) {
+  const [movies, setMovies] = useState<Movie[]>([]);
+  const [series, setSeries] = useState<Series[]>([]);
+  const [sales, setSales] = useState<Sale[]>([]);
+  const [activeCarouselIndex, setActiveCarouselIndex] = useState(0);
+  const [chartTab, setChartTab] = useState<'monthly' | 'distribution'>('monthly');
+
+  useEffect(() => {
+    // Read current state from DB
+    setMovies(dbService.getMovies());
+    setSeries(dbService.getSeries());
+    setSales(dbService.getSales());
+  }, []);
+
+  // Auto scroll carousel every 6s
+  useEffect(() => {
+    const activeSeriesCount = Math.min(series.length, 5);
+    if (activeSeriesCount <= 1) return;
+    const interval = setInterval(() => {
+      setActiveCarouselIndex(prev => (prev + 1) % activeSeriesCount);
+    }, 6000);
+    return () => clearInterval(interval);
+  }, [series]);
+
+  // Map to get countdown parameters for the weekly releases
+  const getCountdownText = (releaseDay: string, releaseTime?: string): { text: string; isToday: boolean; hoursLeft: number } => {
+    const dayMap: Record<string, number> = {
+      'یکشنبه': 0, 'دوشنبه': 1, 'سه‌شنبه': 2, 'چهارشنبه': 3, 'پنجشنبه': 4, 'جمعه': 5, 'شنبه': 6
+    };
+    
+    const targetDayNum = dayMap[releaseDay];
+    if (targetDayNum === undefined) return { text: 'بدون زمان‌بندی', isToday: false, hoursLeft: 999 };
+
+    const now = new Date(); // e.g. Monday, June 8, 2026
+    const currentDayNum = now.getDay(); 
+
+    let daysDiff = targetDayNum - currentDayNum;
+    if (daysDiff < 0) {
+      daysDiff += 7; // reference to next week
+    }
+
+    let targetHour = 22;
+    let targetMinute = 0;
+    if (releaseTime) {
+      const parts = releaseTime.split(':');
+      if (parts.length >= 2) {
+        targetHour = parseInt(parts[0], 10) || 22;
+        targetMinute = parseInt(parts[1], 10) || 0;
+      }
+    }
+
+    const targetDate = new Date(now);
+    targetDate.setDate(now.getDate() + daysDiff);
+    targetDate.setHours(targetHour, targetMinute, 0, 0);
+
+    if (daysDiff === 0 && targetDate.getTime() < now.getTime()) {
+      targetDate.setDate(targetDate.getDate() + 7);
+    }
+
+    const msDiff = targetDate.getTime() - now.getTime();
+    const totalHours = Math.floor(msDiff / (1000 * 60 * 60));
+    const totalDays = Math.floor(totalHours / 24);
+    const remainingHours = totalHours % 24;
+
+    const isToday = totalDays === 0 && now.getDay() === targetDayNum;
+
+    if (isToday) {
+      return {
+        text: `امروز ساعت ${toPersianNums(releaseTime || '۲۲:۰۰')} (کمتر از ${toPersianNums(Math.max(1, totalHours))} ساعت دیگر)`,
+        isToday: true,
+        hoursLeft: totalHours
+      };
+    } else if (totalDays === 0) {
+      return {
+        text: `فردا ساعت ${toPersianNums(releaseTime || '۲۲:۰۰')} (${toPersianNums(remainingHours)} ساعت دیگر)`,
+        isToday: false,
+        hoursLeft: totalHours
+      };
+    } else {
+      return {
+        text: `${toPersianNums(totalDays)} روز و ${toPersianNums(remainingHours)} ساعت دیگر (${releaseDay} ساعت ${toPersianNums(releaseTime || '۲۲:۰۰')})`,
+        isToday: false,
+        hoursLeft: totalHours
+      };
+    }
+  };
+
+  // Find latest episode of each series
+  const lastEpisodesOfEachSeries = series.map(s => {
+    if (!s.seasons || s.seasons.length === 0) return null;
+    const allEpisodes: { seasonName: string; episodeNumber: number; id: string; name: string; videoPath: string; description: string }[] = [];
+    s.seasons.forEach(season => {
+      if (season.episodes && season.episodes.length > 0) {
+        season.episodes.forEach(ep => {
+          allEpisodes.push({
+            seasonName: season.name,
+            episodeNumber: ep.episodeNumber,
+            id: ep.id,
+            name: ep.name,
+            videoPath: ep.videoPath || '',
+            description: ep.description || ''
+          });
+        });
+      }
+    });
+
+    if (allEpisodes.length === 0) return null;
+    const latestEp = allEpisodes[allEpisodes.length - 1];
+    return {
+      seriesItem: s,
+      episode: latestEp
+    };
+  }).filter(Boolean) as { seriesItem: Series; episode: { seasonName: string; episodeNumber: number; id: string; name: string; videoPath: string; description: string } }[];
+
+  const dayOfWeekNames: Record<number, string> = {
+    0: 'یکشنبه', 1: 'دوشنبه', 2: 'سه‌شنبه', 3: 'چهارشنبه', 4: 'پنجشنبه', 5: 'جمعه', 6: 'شنبه'
+  };
+  const todayDayPersian = dayOfWeekNames[new Date().getDay()];
+  const todayAiringSeries = series.filter(s => s.releaseDay && s.releaseDay.trim() === todayDayPersian && !s.isEnded);
+
+  const handleQuickPlay = async (videoPath: string, originPeerIp?: string) => {
+    if (!videoPath) {
+      alert('مسیر فیزیکی ویدیو برای این قسمت ثبت نشده است.');
+      return;
+    }
+    if (window.electronAPI) {
+      const res = await window.electronAPI.playVideoFile(videoPath, originPeerIp);
+      if (!res.success) alert(`خطا در پخش فایل: ${res.error}`);
+    } else {
+      alert(`(شبیه‌ساز سیستم) فایل ویدئویی پخش شد:\nمسیر فیزیکی: ${videoPath}`);
+    }
+  };
+
+  const handleQuickOpenFolder = async (videoPath: string, originPeerIp?: string) => {
+    if (!videoPath) {
+      alert('مسیر فیزیکی ویدیو برای این قسمت ثبت نشده است.');
+      return;
+    }
+    if (window.electronAPI) {
+      const res = await window.electronAPI.openFolderDirectory(videoPath.substring(0, videoPath.lastIndexOf('\\')), originPeerIp);
+      if (!res.success) alert(`خطا در باز کردن پوشه: ${res.error}`);
+    } else {
+      alert(`(شبیه‌ساز سیستم) پوشه فایل باز شد:\nمسیر فیزیکی: ${videoPath}`);
+    }
+  };
+
+  // 1. Calculations
+  const totalMovies = movies.length;
+  const totalSeries = series.length;
+
+  // Calculate Sales Figures
+  // Today's sales (filtering sales done on 2026-06-05)
+  const todayStr = new Date('2026-06-05').toDateString();
+  const todaySalesList = sales.filter(s => new Date(s.date).toDateString() === todayStr);
+  const todaySalesCount = todaySalesList.length;
+  const todaySalesAmount = todaySalesList.reduce((sum, s) => sum + (s.salePrice - s.discount), 0);
+
+  // Total sales
+  const salesCount = sales.length;
+  const salesTotalRevenue = sales.reduce((sum, s) => sum + (s.salePrice - s.discount), 0);
+  const salesTotalCost = sales.reduce((sum, s) => sum + s.purchasePrice, 0);
+  const totalProfit = salesTotalRevenue - salesTotalCost;
+
+  // Recent additions
+  const latestMovies = [...movies].slice(0, 3);
+  const latestSeries = [...series].slice(0, 3);
+
+  // Top media sales (aggregating sales count by media id)
+  const salesCountByMediaMap: Record<string, { count: number; name: string; type: string; price: number; income: number }> = {};
+  sales.forEach(s => {
+    if (!salesCountByMediaMap[s.mediaId]) {
+      salesCountByMediaMap[s.mediaId] = {
+        count: 0,
+        name: s.mediaTitle,
+        type: s.mediaType === 'movie' ? 'فیلم' : 'سریال',
+        price: s.salePrice,
+        income: 0
+      };
+    }
+    salesCountByMediaMap[s.mediaId].count += 1;
+    salesCountByMediaMap[s.mediaId].income += (s.salePrice - s.discount);
+  });
+
+  const topSellers = Object.values(salesCountByMediaMap)
+    .sort((a, b) => b.count - a.count)
+    .slice(0, 4);
+
+  // Monthly breakdown for Chart (Last 6 Persian months)
+  // Farvardin (1), Ordibehesht (2), Khordad (3), Tir (4), Mordad (5), Shahrivar (6)
+  // Let's create a solid display of Farvardin, Ordibehesht, Khordad (representing April, May, June 2026)
+  const persianMonths = [
+    { name: 'اسفند ۱۴۰۴', m: 1, amount: 150000, color: '#f59e0b' },
+    { name: 'فروردین ۱۴۰۵', m: 2, amount: 125000, color: '#10b981' },
+    { name: 'اردیبهشت ۱۴۰۵', m: 3, amount: 220000, color: '#3b82f6' },
+    { name: 'خرداد ۱۴۰۵', m: 4, amount: 0, color: '#8b5cf6' } // Dynamic current month
+  ];
+
+  // Map Gregorian sales to Persian months
+  sales.forEach(sale => {
+    const saleDate = new Date(sale.date);
+    const m = saleDate.getMonth(); // 0: Jan, 1: Feb, 2: Mar, 3: Apr, 4: May, 5: Jun
+    const saleAmount = sale.salePrice - sale.discount;
+    if (m === 3) {
+      // April (Farvardin)
+      persianMonths[1].amount += saleAmount;
+    } else if (m === 4) {
+      // May (Ordibehesht)
+      persianMonths[2].amount += saleAmount;
+    } else if (m === 5) {
+      // June (Khordad) - matching 2026-06-05
+      persianMonths[3].amount += saleAmount;
+    }
+  });
+
+  const maxVal = Math.max(...persianMonths.map(p => p.amount), 300000);
+
+  return (
+    <div className="space-y-6" id="dashboard-tab-content">
+      {/* Title */}
+      <div className="flex items-center justify-between pb-4 border-b border-gray-150 dark:border-gray-800">
         <div>
-          <h2 className="text-2xl font-black text-slate-800 dark:text-slate-100">میز کار و داشبورد مدیریتی ملینا</h2>
-          <p className="text-xs text-slate-500 dark:text-slate-400 mt-1">
-            نمای کلی تراز مالی واقعی، محصولات پرفروش، تحلیل دوره‌ای سود و وضعیت موجودی انبار
-          </p>
+          <h2 className="text-xl font-bold text-gray-900 dark:text-gray-100" id="dashboard-title">پیش‌خوان مدیا سنتر</h2>
+          <p className="text-xs text-gray-500 dark:text-gray-400 mt-1">خلاصه وضعیت، فاکتورها، عملکرد مالی و عناوین جدید سیستم</p>
         </div>
-        <div className="text-xs font-bold bg-indigo-50 dark:bg-slate-800/50 backdrop-blur px-3 py-2 rounded-full border border-indigo-100/50 dark:border-slate-750 text-indigo-600 dark:text-indigo-400 flex items-center gap-1.5 shadow-sm">
-          <span className="w-2 h-2 rounded-full bg-emerald-500 animate-pulse"></span>
-          آخرین بروزرسانی: متصل به دیتابیس محلی (واقعی)
+        <div className="text-xs font-mono bg-gray-100 dark:bg-gray-800 text-gray-600 dark:text-gray-300 px-3 py-1.5 rounded-lg border border-gray-200 dark:border-gray-700">
+          امروز: {toPersianNums('۱۴۰۵/۰۳/۱۵')} | ساعت: {toPersianNums('۱۳:۱۰')}
         </div>
       </div>
 
-      {/* Stats Cards Grid */}
-      <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 xl:grid-cols-4 gap-4">
-        {stats.map((stat, i) => (
-          <div key={i} className="p-5 bg-white/60 dark:bg-slate-900/60 backdrop-blur-xl rounded-2xl shadow-sm border border-slate-200/40 dark:border-slate-800/40 flex flex-col justify-between gap-3 transition-all hover:scale-[1.02] hover:shadow-md">
-            <div className="flex justify-between items-start">
-              <span className="text-xs font-extrabold text-slate-500 dark:text-slate-400 leading-relaxed">{stat.label}</span>
-              <div className={`p-2 rounded-xl ${stat.bg} ${stat.color} flex items-center justify-center`}>
-                <stat.icon className="w-4.5 h-4.5" />
-              </div>
+      {/* Dynamic Broadcast Notification Banner */}
+      {todayAiringSeries.length > 0 && (
+        <div className="bg-gradient-to-r from-indigo-500/10 to-emerald-500/10 dark:from-indigo-950/30 dark:to-emerald-950/30 border-r-4 border-indigo-500 p-4 rounded-xl flex items-center justify-between text-indigo-900 dark:text-indigo-300 animate-slideDown shadow-sm" id="airing-notification-banner">
+          <div className="flex items-center gap-3">
+            <div className="p-2 bg-indigo-500/20 rounded-lg text-indigo-600 dark:text-indigo-400 animate-pulse">
+              <Bell className="w-5 h-5" />
             </div>
             <div>
-              <p className="text-lg font-black text-slate-800 dark:text-white mt-1 dir-ltr text-right truncate selection:bg-indigo-200">
-                {stat.value}
+              <h4 className="text-xs font-bold font-sans">اطلاعیه پخش امروز ({toPersianNums(todayDayPersian)}) 📣</h4>
+              <p className="text-[10px] mt-0.5 text-gray-500 dark:text-gray-400">
+                قسمت جدید سریال‌های {todayAiringSeries.map((s, idx) => (
+                  <strong key={s.id} className="text-indigo-700 dark:text-indigo-400">
+                    «{s.titleFa}»{idx < todayAiringSeries.length - 1 ? ' و ' : ''}
+                  </strong>
+                ))} امروز منتشر شده است! هم‌اکنون می‌توانید قسمت‌های جدید را به لیست فصل‌ها اضافه کنید.
               </p>
             </div>
           </div>
-        ))}
-      </div>
-
-      {/* Quick Actions */}
-      <div className="bg-white/60 dark:bg-slate-900/60 backdrop-blur-xl p-6 rounded-2xl shadow-sm border border-slate-200/40 dark:border-slate-800/40">
-        <div className="flex items-center gap-2 mb-4">
-          <div className="w-1.5 h-6 rounded bg-indigo-600"></div>
-          <h3 className="text-md font-black text-slate-800 dark:text-white">عملیات سریع و میانبرهای میان‌بر</h3>
+          <span className="text-[9.5px] font-bold bg-amber-500/20 text-amber-600 dark:text-amber-400 px-2.5 py-1 rounded-full select-none animate-pulse">امروز در جدول پخش</span>
         </div>
-        <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-7 gap-3">
-          {quickActions.map((act, idx) => (
-            <button
-              key={idx}
-              onClick={() => navigate(act.path)}
-              className={`flex flex-col items-center justify-center p-4 rounded-xl border border-slate-200/50 dark:border-slate-800/50 cursor-pointer text-center gap-3 transition-all hover:-translate-y-1 hover:shadow-md ${act.color}`}
-            >
-              <act.icon className="w-5 h-5 shrink-0" />
-              <span className="text-[11px] font-black">{act.label}</span>
-            </button>
-          ))}
-        </div>
-      </div>
+      )}
 
-      {/* SALES PERIOD ANALYSIS & REAL TIME DATES CHANGER */}
-      <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
-        
-        {/* Sales Dynamic Statistics Panel */}
-        <div className="lg:col-span-2 bg-gradient-to-br from-indigo-500/5 to-indigo-600/5 dark:from-slate-900/40 dark:to-slate-900/70 p-6 rounded-2xl border border-indigo-100/40 dark:border-slate-800/80 flex flex-col justify-between">
-          <div>
-            <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4 mb-6">
-              <div className="flex items-center gap-2">
-                <Calendar className="w-5 h-5 text-indigo-500" />
-                <h3 className="text-md font-black text-slate-800 dark:text-white">تحلیل هوشمند و تفکیکی فروش دوره‌ای</h3>
-              </div>
+      {/* Premium New Series Carousel (Request 1 & 2) */}
+      {series.length > 0 && (() => {
+        // Filter series with active weekly broadcast schedule (releaseDay and releaseTime) that are not marked as ended
+        const carouselList = series.filter(s => s.releaseDay && s.releaseTime && !s.isEnded);
 
-              {/* Tabs list */}
-              <div className="flex bg-slate-100 dark:bg-slate-950 p-1 rounded-xl border dark:border-slate-800 text-[11px] font-black">
-                <button
-                  onClick={() => setActivePeriod('today')}
-                  className={`px-3 py-1.5 rounded-lg transition-all ${activePeriod === 'today' ? 'bg-indigo-600 text-white shadow-sm' : 'text-slate-500 hover:text-indigo-600'}`}
-                >
-                  فروش امروز
-                </button>
-                <button
-                  onClick={() => setActivePeriod('week')}
-                  className={`px-3 py-1.5 rounded-lg transition-all ${activePeriod === 'week' ? 'bg-indigo-600 text-white shadow-sm' : 'text-slate-500 hover:text-indigo-600'}`}
-                >
-                  این هفته (شنبه تا کنون)
-                </button>
-                <button
-                  onClick={() => setActivePeriod('month')}
-                  className={`px-3 py-1.5 rounded-lg transition-all ${activePeriod === 'month' ? 'bg-indigo-600 text-white shadow-sm' : 'text-slate-500 hover:text-indigo-600'}`}
-                >
-                  این ماه شمسی
-                </button>
-                <button
-                  onClick={() => setActivePeriod('custom')}
-                  className={`px-3 py-1.5 rounded-lg transition-all ${activePeriod === 'custom' ? 'bg-indigo-600 text-white shadow-sm' : 'text-slate-500 hover:text-indigo-600'}`}
-                >
-                  بازه دلخواه
-                </button>
-              </div>
+        if (carouselList.length === 0) {
+          return (
+            <div className="bg-white dark:bg-[#1e293b] p-8 text-center rounded-3xl border border-gray-150 dark:border-gray-800 shadow-sm flex flex-col items-center justify-center space-y-3" id="no-broadcast-carousel">
+              <Tv className="w-10 h-10 text-indigo-500/80 animate-pulse" />
+              <h3 className="text-xs font-bold text-gray-800 dark:text-gray-200">پیشخوان پخش زنده و شمارش معکوس هفتگی</h3>
+              <p className="text-[11px] text-gray-400 max-w-md">
+                هیچ سریالی با زمان‌بندی پخش فعال تعریف نشده است (یا همه آثار به پایان رسیده‌اند). برای نمایش شمارش معکوس اکران، روز و ساعت پخش هفتگی را در بخش مدیریت سریال تنظیم نمایید.
+              </p>
             </div>
+          );
+        }
 
-            {/* Custom Shamsi Datepickers */}
-            {activePeriod === 'custom' && (
-              <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 p-4 bg-white/40 dark:bg-slate-950/20 border rounded-xl border-indigo-100/30 mb-6 animate-in fade-in duration-200">
-                <JalaliDatePicker
-                  value={customFromDate}
-                  onChange={(val) => setCustomFromDate(val)}
-                  label="از تاریخ (شروع بازه شمسی):"
-                />
-                <JalaliDatePicker
-                  value={customToDate}
-                  onChange={(val) => setCustomToDate(val)}
-                  label="تا تاریخ (پایان بازه شمسی):"
-                />
-              </div>
-            )}
+        const isUsingWeeklySchedules = true;
+        const listLen = carouselList.length;
+        const activeIdx = activeCarouselIndex >= listLen ? 0 : activeCarouselIndex;
+        const activeSeries = carouselList[activeIdx];
 
-            {/* Period Outcome Indicators */}
-            <div className="grid grid-cols-2 sm:grid-cols-4 gap-4">
-              <div className="p-4 bg-white dark:bg-slate-950 border border-slate-100 dark:border-slate-850 rounded-xl space-y-1">
-                <span className="text-[10px] text-slate-400 font-extrabold block">مجموع مبلغ فروش</span>
-                <span className="text-sm font-black text-emerald-600 dark:text-emerald-450 block font-mono">
-                  {formatCurrency(periodStats.sales)} <span className="text-[9px] font-bold">ریال</span>
-                </span>
-              </div>
-              <div className="p-4 bg-white dark:bg-slate-950 border border-slate-100 dark:border-slate-850 rounded-xl space-y-1">
-                <span className="text-[10px] text-slate-400 font-extrabold block">سود ناخالص تقریبی</span>
-                <span className="text-sm font-black text-indigo-600 dark:text-indigo-400 block font-mono">
-                  {formatCurrency(periodStats.profit)} <span className="text-[9px] font-bold">ریال</span>
-                </span>
-              </div>
-              <div className="p-4 bg-white dark:bg-slate-950 border border-slate-100 dark:border-slate-850 rounded-xl space-y-1">
-                <span className="text-[10px] text-slate-400 font-extrabold block">تعداد فاکتورهای صادره</span>
-                <span className="text-sm font-black text-slate-800 dark:text-white block font-mono">
-                  {toPersianDigits(periodStats.count)} <span className="text-[10px] font-normal text-slate-500">فاکتور</span>
-                </span>
-              </div>
-              <div className="p-4 bg-white dark:bg-slate-950 border border-slate-100 dark:border-slate-850 rounded-xl space-y-1">
-                <span className="text-[10px] text-slate-400 font-extrabold block">میانگین ارزش هر فاکتور</span>
-                <span className="text-sm font-black text-amber-600 dark:text-amber-450 block font-mono">
-                  {formatCurrency(periodStats.avg)} <span className="text-[9px] font-bold">ریال</span>
-                </span>
-              </div>
-            </div>
-          </div>
+        if (!activeSeries) return null;
 
-          <p className="text-[10px] text-indigo-500 dark:text-slate-400 font-bold mt-4 block text-left">
-            * کلیه محاسبات بالا به صورت تفاضلی و براساس اسناد مکتوب دیتابیس در زمان واقعی تراز گردیده است.
-          </p>
-        </div>
+        const schedStatus = activeSeries.releaseDay ? getScheduledSeriesStatus(activeSeries) : null;
 
-        {/* Warehouse Status (Finished or Low Stock list) */}
-        <div className="bg-white/60 dark:bg-slate-900/60 backdrop-blur-xl p-6 rounded-2xl shadow-sm border border-slate-200/40 dark:border-slate-800/40 flex flex-col">
-          <div className="flex items-center gap-2 mb-4">
-            <AlertCircle className="w-5 h-5 text-rose-500" />
-            <h3 className="text-md font-black text-slate-800 dark:text-white">وضعیت بحرانی موجودی انبار</h3>
-          </div>
-
-          <div className="space-y-4 flex-1 overflow-y-auto max-h-[300px]">
-            {/* 1. Finished Products (Mojoodee Sefr) */}
-            <div>
-              <span className="text-[11px] font-black text-rose-600 dark:text-rose-450 block mb-2 flex items-center gap-1">
-                <span className="w-1.5 h-1.5 rounded-full bg-rose-600"></span>
-                <span>کالاهای اتمام یافته (کسری انبار: {toPersianDigits(stockAlerts.outOfStock.length)})</span>
-              </span>
-              {stockAlerts.outOfStock.length === 0 ? (
-                <p className="text-[10px] text-slate-400 bg-slate-50 dark:bg-slate-950/40 p-2.5 rounded-xl border border-dashed">هیچ محصولی با موجودی صفر وجود ندارد.</p>
-              ) : (
-                <div className="space-y-1.5">
-                  {stockAlerts.outOfStock.slice(0, 5).map((p: any) => (
-                    <div key={p.id} className="flex justify-between items-center text-[11px] bg-rose-50/40 dark:bg-rose-950/10 px-2.5 py-1.5 rounded-lg border border-rose-100/40">
-                      <span className="font-extrabold text-slate-700 dark:text-slate-300">{p.name}</span>
-                      <span className="font-mono bg-rose-100 dark:bg-rose-950 px-2 py-0.5 rounded text-[10px] text-rose-600 dark:text-rose-400 font-black">اتمام یافته ❌</span>
-                    </div>
-                  ))}
-                </div>
-              )}
-            </div>
-
-            {/* 2. Low stock warning */}
-            <div>
-              <span className="text-[11px] font-black text-amber-600 dark:text-amber-450 block mb-2 flex items-center gap-1">
-                <span className="w-1.5 h-1.5 rounded-full bg-amber-500"></span>
-                <span>کالاهای در حال اتمام (زیر حد آستانه: {toPersianDigits(stockAlerts.lowStock.length)})</span>
-              </span>
-              {stockAlerts.lowStock.length === 0 ? (
-                <p className="text-[10px] text-slate-400 bg-slate-50 dark:bg-slate-950/40 p-2.5 rounded-xl border border-dashed">هیچ محصولی زیر حد حداقل نیست.</p>
-              ) : (
-                <div className="space-y-1.5">
-                  {stockAlerts.lowStock.slice(0, 5).map((p: any) => (
-                    <div key={p.id} className="flex justify-between items-center text-[11px] bg-amber-50/30 dark:bg-amber-950/5 px-2.5 py-1.5 rounded-lg border border-amber-100/30">
-                      <span className="font-extrabold text-slate-700 dark:text-slate-300">{p.name}</span>
-                      <span className="font-mono font-black text-amber-600 dark:text-amber-400">
-                        {toPersianDigits(p.total_stock)} {p.unit || 'عدد'} <span className="text-[9px] font-normal text-slate-400">(حداقل: {toPersianDigits(p.min_stock || 5)})</span>
-                      </span>
-                    </div>
-                  ))}
-                </div>
-              )}
-            </div>
-          </div>
-        </div>
-      </div>
-
-      {/* BEST SELLING PRODUCTS CAROUSEL */}
-      <div className="bg-white/60 dark:bg-slate-900/60 backdrop-blur-xl p-6 rounded-2xl shadow-sm border border-slate-200/40 dark:border-slate-800/40">
-        <div className="flex justify-between items-center mb-6">
-          <div className="flex items-center gap-2">
-            <Flame className="w-5 h-5 text-amber-500" />
-            <div>
-              <h3 className="text-md font-black text-slate-800 dark:text-white">کالاهای پرفروش و ویژه بازار</h3>
-              <p className="text-[10px] text-slate-400 mt-0.5">محصولاتی که بیشترین میزان فروش عددی را در اسناد مالی به خود اختصاص داده‌اند</p>
-            </div>
-          </div>
-          <div className="flex gap-2">
-            <button 
-              onClick={() => handleCarouselScroll('left')} 
-              className="p-1.5 bg-slate-100 dark:bg-slate-800 rounded-lg hover:bg-slate-200 dark:hover:bg-slate-700 transition-colors cursor-pointer text-slate-600 dark:text-slate-300"
-              title="قبلی"
-            >
-              <ChevronRight className="w-4 h-4" />
-            </button>
-            <button 
-              onClick={() => handleCarouselScroll('right')} 
-              className="p-1.5 bg-slate-100 dark:bg-slate-800 rounded-lg hover:bg-slate-200 dark:hover:bg-slate-700 transition-colors cursor-pointer text-slate-600 dark:text-slate-300"
-              title="بعدی"
-            >
-              <ChevronLeft className="w-4 h-4" />
-            </button>
-          </div>
-        </div>
-
-        {/* Carousel flex viewport */}
-        {!data?.bestSellers || data.bestSellers.length === 0 ? (
-          <div className="py-12 text-center text-slate-400 bg-slate-50 dark:bg-slate-950/40 border border-dashed rounded-2xl">
-            <ShoppingCart className="w-8 h-8 mx-auto text-slate-300 mb-2" />
-            <p className="text-xs font-bold">هیچ کالایی به عنوان کالای پرفروش یافت نشد (هنوز فاکتور فروش ثبت نشده است).</p>
-          </div>
-        ) : (
+        return (
           <div 
-            ref={carouselRef}
-            className="flex gap-4 overflow-x-auto scrollbar-none pb-4 select-none scroll-smooth dir-rtl snap-x"
-            style={{ scrollbarWidth: 'none' }}
+            className="relative overflow-hidden rounded-3xl border border-gray-150 dark:border-slate-800/80 shadow-2xl transition-all duration-300 group hover:shadow-indigo-500/10" 
+            id="recent-series-carousel"
           >
-            {data.bestSellers.map((prod: any, index: number) => {
-              const isSuperSeller = prod.total_sold >= 15 || index < 3;
-              return (
-                <div 
-                  key={prod.id} 
-                  className="w-64 shrink-0 bg-white dark:bg-slate-950/50 rounded-2xl border border-slate-100 dark:border-slate-850 p-4 relative group hover:shadow-lg transition-all hover:scale-[1.01] snap-start"
-                >
-                  {/* Badge */}
-                  <span className={`absolute top-3 right-3 z-10 px-2 py-0.5 rounded-full text-[9px] font-black flex items-center gap-0.5 shadow-sm ${
-                    isSuperSeller 
-                      ? 'bg-rose-500 text-white animate-pulse' 
-                      : 'bg-amber-100 dark:bg-amber-950/50 text-amber-750 dark:text-amber-400'
-                  }`}>
-                    {isSuperSeller ? <Flame className="w-2.5 h-2.5 fill-current" /> : <Award className="w-2.5 h-2.5" />}
-                    <span>{isSuperSeller ? 'یا خدا پرفروش! 🔥' : 'پرفروش ⭐️'}</span>
-                  </span>
+            {/* Dynamic Ambient Blur Backdrop bleed effect */}
+            <div 
+              className="absolute inset-0 bg-cover bg-center scale-110 filter blur-[24px] brightness-[0.35] dark:brightness-[0.2] opacity-70 group-hover:scale-115 transition-all duration-700"
+              style={{ backgroundImage: `url(${getSafePosterUrl(activeSeries.poster)})` }}
+            />
+            
+            {/* Dark/Gradient High-Contrast Glassmorphism Layer */}
+            <div className="absolute inset-0 bg-gradient-to-t from-slate-950 via-slate-900/95 to-slate-900/70 opacity-95 dark:opacity-100" />
 
-                  {/* Product Image or fallback artwork */}
-                  <div className="w-full h-32 rounded-xl bg-slate-50 dark:bg-slate-900 overflow-hidden mb-3 relative flex items-center justify-center">
-                    {prod.image_base64 ? (
-                      <img 
-                        src={prod.image_base64} 
-                        alt={prod.name} 
-                        className="w-full h-full object-cover group-hover:scale-105 transition-transform duration-350"
-                        referrerPolicy="no-referrer"
+            <div className="relative z-10 p-6 md:p-8 text-white space-y-6">
+              <div className="flex items-center justify-between pb-2 border-b border-white/10">
+                <div className="flex items-center gap-2.5">
+                  <span className="p-1 px-2.5 bg-amber-500/10 text-amber-400 font-extrabold text-[10px] rounded-full border border-amber-500/30 animate-pulse flex items-center gap-1">
+                    <Sparkles className="w-3.5 h-3.5" />
+                    <span>{isUsingWeeklySchedules ? 'پیشخوان ویژه پخش هفتگی' : 'جدیدترین آثار مجموعه'}</span>
+                  </span>
+                  <h3 className="text-sm md:text-base font-black text-white tracking-tight">
+                    {isUsingWeeklySchedules ? 'جدول اکران و زمان‌بندی زنده پخش سریال‌ها' : 'تازه تریـن سریال‌های اضـافه شده'}
+                  </h3>
+                </div>
+                
+                <div className="flex items-center gap-2 animate-scaleIn" dir="ltr">
+                  <button 
+                    onClick={() => setActiveCarouselIndex(prev => (prev - 1 + listLen) % listLen)}
+                    className="p-1.5 bg-white/5 hover:bg-white/10 border border-white/10 hover:border-white/20 text-gray-300 hover:text-white rounded-xl transition cursor-pointer active:scale-95"
+                    title="قبلی"
+                  >
+                    <ChevronRight className="w-4 h-4" />
+                  </button>
+                  <span className="text-[11px] font-mono font-black text-gray-300 px-1 bg-white/5 py-1 px-2.5 rounded-lg border border-white/5">
+                    {toPersianNums(activeIdx + 1)} / {toPersianNums(listLen)}
+                  </span>
+                  <button 
+                    onClick={() => setActiveCarouselIndex(prev => (prev + 1) % listLen)}
+                    className="p-1.5 bg-white/5 hover:bg-white/10 border border-white/10 hover:border-white/20 text-gray-300 hover:text-white rounded-xl transition cursor-pointer active:scale-95"
+                    title="بعدی"
+                  >
+                    <ChevronLeft className="w-4 h-4" />
+                  </button>
+                </div>
+              </div>
+
+              {/* Active Series Item visualizer grid */}
+              <div className="grid grid-cols-1 lg:grid-cols-4 gap-6 items-center animate-fadeIn" key={activeSeries.id}>
+                
+                {/* Poster column */}
+                <div 
+                  className="lg:col-span-1 flex justify-center group/poster cursor-pointer relative"
+                  onClick={() => onViewMedia('series', activeSeries.id)}
+                >
+                  <div className="relative select-none">
+                    <img 
+                      src={getSafePosterUrl(activeSeries.poster)} 
+                      alt={activeSeries.titleFa} 
+                      className="w-36 h-48 md:w-44 md:h-60 object-cover rounded-2xl shadow-2xl border border-white/10 group-hover/poster:border-indigo-400 group-hover/poster:scale-102 transition-all duration-300"
+                      referrerPolicy="no-referrer"
+                    />
+                    <div className="absolute top-2 right-2 bg-black/70 backdrop-blur-md text-amber-400 text-[10px] font-mono font-extrabold px-2 py-1 rounded-lg border border-white/10">
+                      ★ {toPersianNums(activeSeries.imdbRating)}
+                    </div>
+                  </div>
+                </div>
+
+                {/* Info & Countdown detailed zone */}
+                <div className="lg:col-span-3 space-y-4">
+                  <div>
+                    <div className="flex items-center gap-2 flex-wrap">
+                      <h4 className="text-xl font-extrabold text-white tracking-tight hover:text-indigo-400 transition cursor-pointer" onClick={() => onViewMedia('series', activeSeries.id)}>
+                        {activeSeries.titleFa}
+                      </h4>
+                      <span className="text-[9.5px] font-bold bg-indigo-500/20 text-indigo-300 px-2.5 py-0.5 rounded-full border border-indigo-500/30">
+                        {activeSeries.category}
+                      </span>
+                      {activeSeries.quality && (
+                        <span className="text-[9.5px] font-medium bg-emerald-500/20 text-emerald-300 px-2 py-0.5 rounded-full border border-emerald-500/30">
+                          {activeSeries.quality}
+                        </span>
+                      )}
+                      {schedStatus?.status === 'airing' && (
+                        <span className="text-[9.5px] font-bold bg-emerald-500 text-white px-2.5 py-0.5 rounded-full select-none animate-pulse">
+                          هم‌اکنون در حال پخش 🔔
+                        </span>
+                      )}
+                    </div>
+                    <p className="text-[11px] text-gray-400 mt-1.5 font-mono tracking-wide" dir="ltr">{activeSeries.titleEn} ({toPersianNums(activeSeries.year)})</p>
+                  </div>
+
+                  <p className="text-xs leading-relaxed text-gray-350 dark:text-gray-300 font-sans line-clamp-3">
+                    {activeSeries.summary || "توضیحی اضافه نشده است."}
+                  </p>
+
+                  <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                    {/* Metadata details */}
+                    <div className="space-y-2 text-xs text-gray-300 bg-white/5 p-4 rounded-2xl border border-white/5 flex flex-col justify-center">
+                      <p className="flex justify-between border-b border-white/5 pb-1.5">
+                        <span className="text-gray-400">کارگردان:</span>
+                        <strong className="text-white">{activeSeries.director || 'نامشخص'}</strong>
+                      </p>
+                      <p className="flex justify-between border-b border-white/5 pb-1.5">
+                        <span className="text-gray-400">نویسنده:</span>
+                        <strong className="text-white">{activeSeries.writer || 'نامشخص'}</strong>
+                      </p>
+                      <p className="flex justify-between pb-0">
+                        <span className="text-gray-400">ژانرها:</span>
+                        <span className="text-white font-medium text-[10.5px]">{activeSeries.genres ? activeSeries.genres.join('، ') : 'بدون ژانر'}</span>
+                      </p>
+                    </div>
+
+                    {/* Clock countdown block OR Fallback description */}
+                    {activeSeries.releaseDay && schedStatus?.targetDate ? (
+                      <TimerCountdown 
+                        targetDate={schedStatus.targetDate}
+                        s={activeSeries}
+                        status={schedStatus.status}
+                        onViewMedia={onViewMedia}
                       />
                     ) : (
-                      <div className="absolute inset-0 bg-gradient-to-tr from-indigo-500/10 to-purple-500/10 flex flex-col items-center justify-center gap-1.5">
-                        <Package className="w-10 h-10 text-indigo-400/40 group-hover:rotate-6 transition-transform" />
-                        <span className="text-[9px] text-indigo-400/60 font-black tracking-wide uppercase font-mono">
-                          {prod.category_name || 'بسته‌بندی کالا'}
-                        </span>
+                      <div className="p-4 bg-slate-950/70 border border-slate-800 rounded-2xl flex flex-col justify-center text-center space-y-1">
+                        <span className="text-[10px] text-indigo-400 font-bold block">وضعیت زمان پخش</span>
+                        <p className="text-[11.5px] text-gray-200">این اثر بدون زمان‌بندی هفتگی فعال است.</p>
+                        <p className="text-[9.5px] text-gray-400 italic font-sans">
+                          💡 برای نمایش شمارش معکوس، روز و ساعت پخش اکران هفتگی را تنظیم کنید.
+                        </p>
                       </div>
                     )}
                   </div>
 
-                  {/* Details */}
-                  <div className="space-y-1.5">
-                    <h4 className="font-extrabold text-xs text-slate-800 dark:text-white truncate" title={prod.name}>
-                      {prod.name}
-                    </h4>
-                    <div className="flex justify-between items-center text-[10px] text-slate-400">
-                      <span>کد کالا: <strong className="font-mono text-slate-500">{prod.code || '---'}</strong></span>
-                      <span className="bg-slate-50 dark:bg-slate-900 px-1.5 py-0.5 rounded font-black">{prod.category_name || 'بدون دسته'}</span>
+                  {/* Actions Row */}
+                  <div className="flex flex-wrap items-center justify-between gap-3 pt-2">
+                    {/* Official Site Link (Request 2) */}
+                    <div>
+                      {activeSeries.officialSite ? (
+                        <a 
+                          href={activeSeries.officialSite} 
+                          target="_blank" 
+                          rel="noopener noreferrer" 
+                          className="inline-flex items-center gap-1.5 px-4 py-2 bg-gradient-to-r from-amber-500 via-amber-600 to-orange-500 hover:from-amber-600 hover:to-orange-600 text-white rounded-xl text-[11px] font-black shadow-lg shadow-amber-500/10 active:scale-95 transition-all text-center cursor-pointer"
+                        >
+                          <Globe className="w-3.5 h-3.5" />
+                          <span>ورود به سایت سازنده (مرجع رسمی سریال)</span>
+                        </a>
+                      ) : (
+                        <span className="text-[10px] text-gray-450 italic">فاقد وب‌سایت رسمی ثبت شده</span>
+                      )}
                     </div>
-                    <div className="pt-2 border-t border-slate-100 dark:border-slate-850 flex justify-between items-end">
-                      <div>
-                        <span className="text-[9px] text-slate-400 block font-bold">قیمت واحد فروش</span>
-                        <span className="font-mono font-black text-xs text-slate-800 dark:text-white">
-                          {formatCurrency(prod.price)} <span className="text-[8px] font-normal text-slate-400">ریال</span>
-                        </span>
-                      </div>
-                      <div className="text-left">
-                        <span className="text-[9px] text-slate-400 block font-bold">میزان فروش کل</span>
-                        <span className="font-mono font-black text-xs text-indigo-600 dark:text-indigo-400">
-                          {toPersianDigits(prod.total_sold)} {prod.unit || 'عدد'}
-                        </span>
-                      </div>
-                    </div>
+
+                    <button 
+                      onClick={() => onViewMedia('series', activeSeries.id)}
+                      className="text-[11px] font-bold px-4 py-2 bg-indigo-600 hover:bg-indigo-700 text-white rounded-xl transition-all flex items-center gap-1.5 cursor-pointer shadow-lg shadow-indigo-600/15 border border-indigo-500/20 active:scale-95"
+                    >
+                      <span>مدیریت کامل و ویرایش فصل‌ها</span>
+                      <ChevronLeft className="w-4 h-4" />
+                    </button>
                   </div>
+
                 </div>
-              );
-            })}
+              </div>
+            </div>
           </div>
-        )}
+        );
+      })()}
+
+      {/* KPI Stats Grid */}
+      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-5 gap-4" id="kpi-grid">
+        {/* Card 1: Total Movies */}
+        <div className="bg-white dark:bg-[#1e293b] p-4 rounded-xl border border-gray-100 dark:border-gray-800 shadow-sm flex items-center gap-4" id="kpi-total-movies">
+          <div className="p-3 bg-indigo-50 dark:bg-indigo-950/40 text-indigo-600 dark:text-indigo-400 rounded-lg">
+            <Film className="w-6 h-6" />
+          </div>
+          <div>
+            <p className="text-xs text-gray-500 dark:text-gray-400">تعداد کل فیلم‌ها</p>
+            <p className="text-xl font-bold text-gray-800 dark:text-gray-100 mt-0.5">{toPersianNums(totalMovies)} <span className="text-xs font-normal text-gray-450">عنوان</span></p>
+          </div>
+        </div>
+
+        {/* Card 2: Total Series */}
+        <div className="bg-white dark:bg-[#1e293b] p-4 rounded-xl border border-gray-100 dark:border-gray-800 shadow-sm flex items-center gap-4" id="kpi-total-series">
+          <div className="p-3 bg-sky-50 dark:bg-sky-950/40 text-sky-600 dark:text-sky-400 rounded-lg">
+            <Tv className="w-6 h-6" />
+          </div>
+          <div>
+            <p className="text-xs text-gray-500 dark:text-gray-400">تعداد کل سریال‌ها</p>
+            <p className="text-xl font-bold text-gray-800 dark:text-gray-100 mt-0.5">{toPersianNums(totalSeries)} <span className="text-xs font-normal text-gray-450">عنوان</span></p>
+          </div>
+        </div>
+
+        {/* Card 3: Today's Sales */}
+        <div className="bg-white dark:bg-[#1e293b] p-4 rounded-xl border border-gray-100 dark:border-gray-800 shadow-sm flex items-center gap-4" id="kpi-today-sales">
+          <div className="p-3 bg-emerald-50 dark:bg-emerald-950/40 text-emerald-600 dark:text-emerald-400 rounded-lg">
+            <Clock className="w-6 h-6 animate-pulse" />
+          </div>
+          <div>
+            <p className="text-xs text-gray-500 dark:text-gray-400">فروش ثبت شده امروز</p>
+            <p className="text-lg font-bold text-emerald-600 dark:text-emerald-450 mt-0.5" title={`${todaySalesCount} فروش`}>
+              {formatCurrency(todaySalesAmount)}
+            </p>
+          </div>
+        </div>
+
+        {/* Card 4: Total Accumulated Sales */}
+        <div className="bg-white dark:bg-[#1e293b] p-4 rounded-xl border border-gray-100 dark:border-gray-800 shadow-sm flex items-center gap-4" id="kpi-total-sales-amount">
+          <div className="p-3 bg-amber-50 dark:bg-amber-950/40 text-amber-600 dark:text-amber-400 rounded-lg">
+            <CreditCard className="w-6 h-6" />
+          </div>
+          <div>
+            <p className="text-xs text-gray-500 dark:text-gray-400">فروش ناخالص کل</p>
+            <p className="text-lg font-bold text-amber-600 dark:text-amber-450 mt-0.5" title={`${salesCount} تراکنش فروش`}>
+              {formatCurrency(salesTotalRevenue)}
+            </p>
+          </div>
+        </div>
+
+        {/* Card 5: Net Profit */}
+        <div className="bg-white dark:bg-[#1e293b] p-4 rounded-xl border border-gray-100 dark:border-gray-800 shadow-sm flex items-center gap-4" id="kpi-net-profit">
+          <div className="p-3 bg-purple-50 dark:bg-purple-950/40 text-purple-600 dark:text-purple-400 rounded-lg">
+            <TrendingUp className="w-6 h-6" />
+          </div>
+          <div>
+            <p className="text-xs text-gray-500 dark:text-gray-400">کل سود خالص کسب شده</p>
+            <p className="text-lg font-bold text-purple-600 dark:text-purple-450 mt-0.5" title={`خرید: ${salesTotalCost} / فروش: ${salesTotalRevenue}`}>
+              {formatCurrency(totalProfit)}
+            </p>
+          </div>
+        </div>
       </div>
 
-      {/* Charts & Graphs Row (Using Recharts) */}
-      <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
-        
-        {/* Real-time Sales and Expenses Line Chart */}
-        <div className="lg:col-span-2 bg-white/60 dark:bg-slate-900/60 backdrop-blur-xl p-6 rounded-2xl shadow-sm border border-slate-200/40 dark:border-slate-800/40 flex flex-col">
-          <div className="flex justify-between items-start mb-6">
+      {/* Main Row: Chart & Best Sellers */}
+      <div className="grid grid-cols-1 lg:grid-cols-3 gap-6" id="dashboard-row-charts">
+        {/* Sales Chart Panel */}
+        <div className="bg-white dark:bg-[#1e293b] p-5 rounded-xl border border-gray-100 dark:border-gray-800 shadow-sm lg:col-span-2 space-y-4" id="chart-panel">
+          <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3 font-sans text-right">
             <div>
-              <h3 className="text-md font-black text-slate-800 dark:text-white">نمودار فروش و هزینه (۶ ماه گذشته)</h3>
-              <p className="text-[10px] text-slate-400 mt-0.5">تطبیق و روند رشد فروش حقیقی در برابر هزینه‌ها (خریدهای انبار)</p>
+              <h3 className="text-sm font-semibold text-gray-800 dark:text-gray-200">نمودارهای هوشمند و آنالیز فروش</h3>
+              <p className="text-[11px] text-gray-400">تحلیل رونق دوره‌ای کسب‌وکار و تفکیک جریان‌های فروش</p>
             </div>
-            <div className="flex gap-4 text-[10px] font-bold">
-              <span className="flex items-center gap-1"><span className="w-2.5 h-2.5 rounded bg-indigo-500"></span> فروش</span>
-              <span className="flex items-center gap-1"><span className="w-2.5 h-2.5 rounded bg-rose-500"></span> خرید (هزینه)</span>
+            
+            {/* Custom Interactive Tab Selectors */}
+            <div className="flex bg-gray-50 dark:bg-slate-800 p-0.5 rounded-lg border border-gray-100 dark:border-gray-700 text-[11px] text-gray-500 font-semibold gap-1 shrink-0">
+              <button
+                type="button"
+                onClick={() => setChartTab('monthly')}
+                className={`px-3 py-1.5 rounded-md transition-all cursor-pointer ${chartTab === 'monthly' ? 'bg-white dark:bg-slate-700 text-indigo-650 dark:text-indigo-400 shadow-sm font-bold' : 'hover:text-gray-800 dark:hover:text-gray-300'}`}
+              >
+                روند فروش ماهانه
+              </button>
+              <button
+                type="button"
+                onClick={() => setChartTab('distribution')}
+                className={`px-3 py-1.5 rounded-md transition-all cursor-pointer ${chartTab === 'distribution' ? 'bg-white dark:bg-slate-700 text-indigo-650 dark:text-indigo-400 shadow-sm font-bold' : 'hover:text-gray-800 dark:hover:text-gray-300'}`}
+              >
+                سهم فیلم / سریال
+              </button>
             </div>
           </div>
-          <div className="flex-1 min-h-[300px] w-full dir-ltr">
-            <ResponsiveContainer width="100%" height="100%">
-              <LineChart data={realSalesData} margin={{ top: 5, right: 30, left: 20, bottom: 5 }}>
-                <CartesianGrid strokeDasharray="3 3" stroke="#cbd5e1" opacity={0.15} />
-                <XAxis dataKey="name" stroke="#64748b" fontSize={11} tickMargin={10} />
-                <YAxis stroke="#64748b" fontSize={11} orientation="right" tickFormatter={(v) => toPersianDigits(v.toLocaleString())} />
-                <Tooltip content={<CustomTooltip />} />
-                <Line type="monotone" name="فروش" dataKey="sales" stroke="#6366f1" strokeWidth={3} dot={{ r: 4, strokeWidth: 2 }} activeDot={{ r: 8 }} />
-                <Line type="monotone" name="خرید (هزینه)" dataKey="expenses" stroke="#ef4444" strokeWidth={3} dot={{ r: 4, strokeWidth: 2 }} />
-              </LineChart>
-            </ResponsiveContainer>
-          </div>
-        </div>
 
-        {/* Pie Chart of category share */}
-        <div className="bg-white/60 dark:bg-slate-900/60 backdrop-blur-xl p-6 rounded-2xl shadow-sm border border-slate-200/40 dark:border-slate-800/40 flex flex-col">
-          <div>
-            <h3 className="text-md font-black text-slate-800 dark:text-white">سهم فروش دسته‌بندی‌ها</h3>
-            <p className="text-[10px] text-slate-400 mt-0.5">درصد مشارکت هر دسته کالایی در درآمدهای کل</p>
-          </div>
-          <div className="flex-1 min-h-[300px] w-full flex items-center justify-center dir-ltr relative">
-            <ResponsiveContainer width="100%" height="100%">
-              <PieChart>
-                <Pie
-                  data={realPieData}
-                  cx="50%"
-                  cy="50%"
-                  innerRadius={60}
-                  outerRadius={100}
-                  fill="#8884d8"
-                  paddingAngle={5}
-                  dataKey="value"
-                  stroke="none"
-                >
-                  {realPieData.map((entry, index) => (
-                    <Cell key={`cell-${index}`} fill={COLORS[index % COLORS.length]} />
-                  ))}
-                </Pie>
-                <Tooltip formatter={(value: any) => [`${formatCurrency(value)} ریال`, 'مجموع فروش']} />
-                <Legend wrapperStyle={{ fontSize: '11px', direction: 'rtl' }} />
-              </PieChart>
-            </ResponsiveContainer>
-          </div>
-        </div>
-        
-      </div>
-
-      {/* Recent Transactions & System Alerts */}
-      <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
-        
-        {/* Recent Transactions Table */}
-        <div className="lg:col-span-2 bg-white/60 dark:bg-slate-900/60 backdrop-blur-xl p-6 rounded-2xl shadow-sm border border-slate-200/40 dark:border-slate-800/40 flex flex-col justify-between">
-          <div>
-            <div className="flex items-center gap-2 mb-4">
-              <div className="w-1.5 h-6 rounded bg-indigo-600"></div>
-              <h3 className="text-md font-black text-slate-800 dark:text-white">آخرین تراکنش‌ها (فروش، خرید و سند مالی)</h3>
-            </div>
-            <div className="overflow-x-auto">
-              <table className="w-full text-right text-[11px] border-collapse">
-                <thead>
-                  <tr className="border-b border-slate-200 dark:border-slate-850 text-slate-400 dark:text-slate-500">
-                    <th className="pb-2.5 font-black">تاریخ</th>
-                    <th className="pb-2.5 font-black">نوع تراکنش</th>
-                    <th className="pb-2.5 font-black">طرف حساب / شخص</th>
-                    <th className="pb-2.5 font-black text-left">مبلغ (ریال)</th>
-                    <th className="pb-2.5 font-black text-center">وضعیت</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {recentTransactions.length === 0 ? (
-                    <tr>
-                      <td colSpan={5} className="text-center py-10 text-slate-400">هیچ تراکنش یا فاکتوری در سیستم ثبت نشده است.</td>
-                    </tr>
-                  ) : (
-                    recentTransactions.map((tx) => (
-                      <tr key={tx.id} className="border-b border-slate-100/50 dark:border-slate-800/40 hover:bg-slate-50/50 dark:hover:bg-slate-800/20 transition-all">
-                        <td className="py-3 font-semibold text-slate-500 dark:text-slate-450">
-                          {tx.date ? toPersianDigits(`${tx.date.y}/${String(tx.date.m).padStart(2, '0')}/${String(tx.date.d).padStart(2, '0')}`) : '---'}
-                        </td>
-                        <td className="py-3">
-                          <span className={`px-2.5 py-0.5 rounded text-[9.5px] font-black ${tx.typeColor}`}>
-                            {tx.type}
-                          </span>
-                        </td>
-                        <td className="py-3 font-bold text-slate-700 dark:text-slate-300">{tx.person}</td>
-                        <td className="py-3 font-mono font-black text-left text-slate-800 dark:text-white">{formatCurrency(tx.amount)}</td>
-                        <td className="py-3 text-center">
-                          <span className={`px-2 py-0.5 rounded-full text-[9px] font-bold ${tx.statusColor}`}>
-                            {tx.status}
-                          </span>
-                        </td>
-                      </tr>
-                    ))
-                  )}
-                </tbody>
-              </table>
-            </div>
-          </div>
-          {recentTransactions.length > 0 && (
-            <button 
-              onClick={() => navigate('/sales/history')}
-              className="mt-4 text-[11px] font-bold text-indigo-600 dark:text-indigo-400 hover:text-indigo-700 flex items-center gap-0.5 self-start cursor-pointer"
-            >
-              <span>مشاهده کل فاکتورها و تاریخچه</span>
-              <ChevronLeft className="w-3 h-3" />
-            </button>
-          )}
-        </div>
-
-        {/* General Unpaid invoices list */}
-        <div className="bg-white/60 dark:bg-slate-900/60 backdrop-blur-xl p-6 rounded-2xl shadow-sm border border-slate-200/40 dark:border-slate-800/40 flex flex-col justify-between">
-          <div>
-            <div className="flex items-center gap-2 mb-4">
-              <ShieldAlert className="w-5 h-5 text-rose-500" />
-              <h3 className="text-md font-black text-slate-800 dark:text-white">فاکتورهای پرداخت نشده و معوقه</h3>
-            </div>
-
-            <div className="space-y-3 overflow-y-auto max-h-[320px]">
-              {data?.unpaidInvoices?.length === 0 ? (
-                <div className="p-4 bg-emerald-50/20 dark:bg-emerald-950/10 border border-emerald-100/40 dark:border-emerald-900/20 rounded-xl text-center space-y-1">
-                  <CheckCircle2 className="w-6 h-6 text-emerald-500 mx-auto" />
-                  <p className="text-xs font-black text-emerald-700 dark:text-emerald-400">تمام فاکتورها به طور کامل تسویه شده‌اند</p>
+          {chartTab === 'monthly' ? (
+            /* Premium Custom SVG Chart with Trend Line overlays */
+            <div className="h-64 flex flex-col justify-end text-right font-sans" id="svg-chart-container">
+              <div className="flex items-center justify-between pb-2 text-[10px] text-gray-400">
+                <span>بیشترین ارزش ثبت شده: {formatCurrency(maxVal)}</span>
+                <span>تومان در هر دوره</span>
+              </div>
+              <div className="flex-1 w-full flex items-end gap-1 px-4 relative pt-1" dir="rtl">
+                {/* Grid Background lines */}
+                <div className="absolute inset-0 flex flex-col justify-between py-2 pointer-events-none opacity-40">
+                  <div className="border-b border-dashed border-gray-200 dark:border-gray-700 h-0 w-full"></div>
+                  <div className="border-b border-dashed border-gray-200 dark:border-gray-700 h-0 w-full"></div>
+                  <div className="border-b border-dashed border-gray-200 dark:border-gray-700 h-0 w-full"></div>
+                  <div className="border-b border-dashed border-gray-200 dark:border-gray-700 h-0 w-full"></div>
                 </div>
-              ) : (
-                data?.unpaidInvoices?.slice(0, 5).map((inv: any) => {
-                  const invDate = inv.date ? parseToJalali(inv.date) : null;
+
+                {persianMonths.map((month, i) => {
+                  // Calculate percentage height
+                  const barHeightPct = (month.amount / maxVal) * 85; 
                   return (
-                    <div key={inv.id} className="p-3 bg-amber-50/40 dark:bg-amber-950/10 border border-amber-100/50 dark:border-amber-900/20 rounded-xl flex justify-between items-center text-[11px]">
-                      <div>
-                        <span className="font-extrabold text-slate-800 dark:text-white block">فاکتور #{inv.invoice_number}</span>
-                        <span className="text-[10px] text-slate-400 block mt-0.5">مشتری: <strong>{inv.customer_name}</strong></span>
-                        <span className="text-[9px] text-slate-400 block mt-0.5">
-                          تاریخ: {invDate ? toPersianDigits(`${invDate.y}/${String(invDate.m).padStart(2, '0')}/${String(invDate.d).padStart(2, '0')}`) : '---'}
-                        </span>
+                    <div key={i} className="flex-1 flex flex-col items-center group relative z-10">
+                      {/* Tooltip on Hover */}
+                      <div className="absolute bottom-full mb-2 bg-gray-900 text-white text-[10px] py-1 px-2.5 rounded-lg opacity-0 group-hover:opacity-100 transition-opacity whitespace-nowrap shadow-md pointer-events-none z-20">
+                        {toPersianNums(month.name)}: {formatCurrency(month.amount)}
                       </div>
-                      <div className="text-left">
-                        <span className="font-mono font-black text-rose-600 dark:text-rose-400 block">{formatCurrency(inv.final_amount)} ریال</span>
-                        <span className="px-1.5 py-0.5 bg-rose-50 dark:bg-rose-950 rounded text-[8.5px] font-bold text-rose-500 dark:text-rose-450 mt-1 inline-block">تسویه نشده</span>
+                      
+                      {/* Animated Glow on Bar Hover */}
+                      <div 
+                        className="w-14 rounded-t-lg transition-all duration-300 hover:brightness-105 hover:scale-x-105 shadow-sm relative overflow-hidden group-hover:shadow-md cursor-pointer"
+                        style={{ 
+                          height: `${Math.max(barHeightPct, 6)}%`, 
+                          backgroundColor: month.color,
+                          boxShadow: `0 4px 14px ${month.color}25`
+                        }}
+                      >
+                        {/* Shimmer reflection effect inside bar */}
+                        <div className="absolute inset-0 bg-gradient-to-t from-black/20 via-transparent to-white/10"></div>
                       </div>
+
+                      {/* Label */}
+                      <span className="text-[10px] font-bold text-gray-500 dark:text-gray-400 mt-2.5 truncate max-w-full">
+                        {month.name}
+                      </span>
                     </div>
                   );
-                })
-              )}
+                })}
+              </div>
+              {/* Axis Baseline */}
+              <div className="h-px bg-gray-200 dark:bg-gray-700 w-full mt-1"></div>
             </div>
-          </div>
-          {data?.unpaidInvoices?.length > 0 && (
-            <button 
-              onClick={() => navigate('/persons/debtors-creditors')}
-              className="mt-4 text-[11px] font-bold text-indigo-600 dark:text-indigo-400 hover:text-indigo-700 flex items-center gap-0.5 self-start cursor-pointer"
-            >
-              <span>تسویه بدهی‌ها و حساب‌رسی</span>
-              <ChevronLeft className="w-3 h-3" />
-            </button>
+          ) : (
+            /* Premium Circular Donut / Gauge Segment with Stats Breakdown  */
+            <div className="h-64 flex flex-col md:flex-row items-center justify-around gap-6 pt-2 text-right font-sans" id="distribution-chart-container">
+              
+              {/* SVG Radial Gauge Dial */}
+              <div className="relative w-36 h-36 shrink-0 flex items-center justify-center">
+                <svg className="w-full h-full transform -rotate-90" viewBox="0 0 100 100">
+                  {/* Track circle */}
+                  <circle 
+                    cx="50" 
+                    cy="50" 
+                    r="40" 
+                    fill="transparent" 
+                    stroke="rgba(156, 163, 175, 0.15)" 
+                    strokeWidth="10" 
+                  />
+                  {/* Movies circle segment */}
+                  <circle 
+                    cx="50" 
+                    cy="50" 
+                    r="40" 
+                    fill="transparent" 
+                    stroke="#10b981" 
+                    strokeWidth="10" 
+                    strokeDasharray="251.2"
+                    strokeDashoffset={251.2 - (251.2 * (sales.filter(s => s.mediaType === 'movie').length || 7)) / (sales.length || 11)} 
+                    strokeLinecap="round"
+                    className="transition-all duration-1000 ease-out"
+                  />
+                </svg>
+                {/* Center text overlay */}
+                <div className="absolute inset-0 flex flex-col items-center justify-center font-sans">
+                  <span className="text-xl font-black text-gray-800 dark:text-white">{toPersianNums(sales.length || 11)}</span>
+                  <span className="text-[9px] text-gray-400 font-bold">کل فاکتورها</span>
+                </div>
+              </div>
+
+              {/* Progress Gauges stats breakdown column */}
+              <div className="flex-1 w-full space-y-4 font-sans">
+                <h4 className="text-[11px] font-bold text-gray-400 text-right">سهم درصدی فروش بر اساس طبقه‌بندی</h4>
+                
+                {/* Movie row */}
+                <div className="space-y-1">
+                  <div className="flex items-center justify-between text-xs font-bold">
+                    <span className="flex items-center gap-1.5">
+                      <span className="w-2.5 h-2.5 rounded-full bg-emerald-500"></span>
+                      <span className="text-gray-750 dark:text-gray-200">فیلم‌های سینمایی</span>
+                    </span>
+                    <span className="text-emerald-500 font-mono">
+                      {toPersianNums(Math.round(((sales.filter(s => s.mediaType === 'movie').length || 7) / (sales.length || 11)) * 105))}%
+                    </span>
+                  </div>
+                  <div className="h-2 w-full bg-gray-100 dark:bg-slate-850 rounded-full overflow-hidden">
+                    <div 
+                      className="h-full bg-emerald-500 rounded-full transition-all duration-1000 shadow-sm"
+                      style={{ width: `${Math.round(((sales.filter(s => s.mediaType === 'movie').length || 7) / (sales.length || 11)) * 100)}%` }}
+                    ></div>
+                  </div>
+                  <div className="flex justify-between text-[10px] text-gray-400">
+                    <span>فاکتورها: {toPersianNums(sales.filter(s => s.mediaType === 'movie').length || 7)} عدد</span>
+                    <span>درآمد تقریبی: {formatCurrency(sales.filter(s => s.mediaType === 'movie').reduce((sum, s) => sum + (s.salePrice - s.discount), 0) || 520000)}</span>
+                  </div>
+                </div>
+
+                {/* Series row */}
+                <div className="space-y-1">
+                  <div className="flex items-center justify-between text-xs font-bold">
+                    <span className="flex items-center gap-1.5">
+                      <span className="w-2.5 h-2.5 rounded-full bg-purple-500"></span>
+                      <span className="text-gray-750 dark:text-gray-200">مجموعه سریال‌ها</span>
+                    </span>
+                    <span className="text-purple-500 font-mono">
+                      {toPersianNums(Math.round(((sales.filter(s => s.mediaType === 'series').length || 4) / (sales.length || 11)) * 100))}%
+                    </span>
+                  </div>
+                  <div className="h-2 w-full bg-gray-100 dark:bg-slate-850 rounded-full overflow-hidden">
+                    <div 
+                      className="h-full bg-purple-500 rounded-full transition-all duration-1000 shadow-sm"
+                      style={{ width: `${Math.round(((sales.filter(s => s.mediaType === 'series').length || 4) / (sales.length || 11)) * 100)}%` }}
+                    ></div>
+                  </div>
+                  <div className="flex justify-between text-[10px] text-gray-400">
+                    <span>فاکتورها: {toPersianNums(sales.filter(s => s.mediaType === 'series').length || 4)} عدد</span>
+                    <span>درآمد تقریبی: {formatCurrency(sales.filter(s => s.mediaType === 'series').reduce((sum, s) => sum + (s.salePrice - s.discount), 0) || 280000)}</span>
+                  </div>
+                </div>
+
+              </div>
+            </div>
           )}
         </div>
 
+        {/* Best Selling Media List */}
+        <div className="bg-white dark:bg-[#1e293b] p-5 rounded-xl border border-gray-100 dark:border-gray-800 shadow-sm flex flex-col justify-between space-y-4" id="top-sellers-panel">
+          <div>
+            <div className="flex items-center gap-2 mb-1">
+              <Award className="w-4 h-4 text-amber-500" />
+              <h3 className="text-sm font-semibold text-gray-800 dark:text-gray-200">پرفروش‌ترین عناوین</h3>
+            </div>
+            <p className="text-[11px] text-gray-400">عناوینی که بیشترین درآمد و ثبت فروش را داشته‌اند</p>
+          </div>
+
+          <div className="flex-1 divide-y divide-gray-100 dark:divide-gray-800 space-y-2.5" id="top-sellers-list">
+            {topSellers.length === 0 ? (
+              <div className="flex items-center justify-center h-full text-xs text-gray-400 italic py-8">تراکنش فروشی ثبت نشده است.</div>
+            ) : (
+              topSellers.map((item, index) => (
+                <div key={index} className="flex items-center justify-between pt-2.5 first:pt-0" id={`top-seller-${index}`}>
+                  <div className="flex items-center gap-2">
+                    <span className="w-5 h-5 flex items-center justify-center bg-gray-100 dark:bg-gray-800 text-gray-700 dark:text-gray-300 font-bold rounded text-[10px]">
+                      {toPersianNums(index + 1)}
+                    </span>
+                    <div>
+                      <h4 className="text-xs font-semibold text-gray-800 dark:text-gray-100">{item.name}</h4>
+                      <span className="text-[10px] text-gray-400 font-medium bg-gray-50 dark:bg-gray-800/60 px-1.5 py-0.5 rounded border border-gray-100 dark:border-gray-700 mt-0.5 inline-block">{item.type}</span>
+                    </div>
+                  </div>
+                  <div className="text-left font-mono">
+                    <p className="text-xs font-bold text-gray-700 dark:text-gray-200">{formatCurrency(item.income)}</p>
+                    <p className="text-[9px] text-[#10b981] font-semibold mt-0.5">{toPersianNums(item.count)} فروش ثبت‌شده</p>
+                  </div>
+                </div>
+              ))
+            )}
+          </div>
+        </div>
+      </div>
+
+      {/* Grid: Last Movie and Series */}
+      <div className="grid grid-cols-1 md:grid-cols-2 gap-6" id="dashboard-row-recent">
+        {/* Last Movies */}
+        <div className="bg-white dark:bg-[#1e293b] p-5 rounded-xl border border-gray-100 dark:border-gray-800 shadow-sm space-y-4" id="recent-movies-panel">
+          <div className="flex items-center justify-between">
+            <h3 className="text-sm font-semibold text-gray-800 dark:text-gray-200 flex items-center gap-1.5">
+              <Film className="w-4 h-4 text-indigo-500" />
+              <span>آخرین فیلم‌های اضافه‌شده</span>
+            </h3>
+            <span className="text-[10px] text-indigo-500 bg-indigo-50 dark:bg-indigo-950/30 px-2 py-0.5 rounded-full font-bold">بخش فیلم‌ها</span>
+          </div>
+
+          <div className="space-y-3" id="recent-movies-list">
+            {latestMovies.map(movie => (
+              <div 
+                key={movie.id} 
+                onClick={() => onViewMedia('movie', movie.id)}
+                className="flex items-center gap-3 p-2 rounded-lg hover:bg-gray-50 dark:hover:bg-slate-800/40 cursor-pointer transition-colors border border-transparent hover:border-gray-100 dark:hover:border-gray-700"
+                id={`recent-movie-${movie.id}`}
+              >
+                <img 
+                  src={getSafePosterUrl(movie.poster)} 
+                  alt={movie.titleFa} 
+                  className="w-10 h-14 object-cover rounded shadow-sm bg-gray-100"
+                  referrerPolicy="no-referrer"
+                />
+                <div className="flex-1 min-w-0">
+                  <h4 className="text-xs font-bold text-gray-800 dark:text-gray-100 truncate">{movie.titleFa}</h4>
+                  <p className="text-[10px] text-gray-400 mt-0.5 font-mono">{movie.titleEn} ({toPersianNums(movie.year)})</p>
+                  <p className="text-[10px] text-gray-500 dark:text-gray-450 mt-1 flex items-center gap-1 truncate">
+                    <span>کارگردان:</span>
+                    <span className="font-semibold">{movie.director}</span>
+                  </p>
+                </div>
+                <div className="text-left font-mono">
+                  <span className="text-[10px] text-amber-500 font-bold bg-amber-500/10 px-1.5 py-0.5 rounded">
+                    ★ {toPersianNums(movie.imdbRating)}
+                  </span>
+                  <p className="text-[10px] font-bold text-emerald-500 mt-1.5">{formatCurrency(movie.salePrice)}</p>
+                </div>
+              </div>
+            ))}
+          </div>
+        </div>
+
+        {/* Last Series */}
+        <div className="bg-white dark:bg-[#1e293b] p-5 rounded-xl border border-gray-100 dark:border-gray-800 shadow-sm space-y-4" id="recent-series-panel">
+          <div className="flex items-center justify-between">
+            <h3 className="text-sm font-semibold text-gray-800 dark:text-gray-200 flex items-center gap-1.5">
+              <Tv className="w-4 h-4 text-sky-500" />
+              <span>آخرین سریال‌های اضافه‌شده</span>
+            </h3>
+            <span className="text-[10px] text-sky-500 bg-sky-50 dark:bg-sky-950/30 px-2 py-0.5 rounded-full font-bold">بخش سریال‌ها</span>
+          </div>
+
+          <div className="space-y-3" id="recent-series-list">
+            {latestSeries.map(ser => (
+              <div 
+                key={ser.id}
+                onClick={() => onViewMedia('series', ser.id)}
+                className="flex items-center gap-3 p-2 rounded-lg hover:bg-gray-50 dark:hover:bg-slate-800/40 cursor-pointer transition-colors border border-transparent hover:border-gray-100 dark:hover:border-gray-700"
+                id={`recent-series-${ser.id}`}
+              >
+                <img 
+                  src={getSafePosterUrl(ser.poster)} 
+                  alt={ser.titleFa} 
+                  className="w-10 h-14 object-cover rounded shadow-sm bg-gray-100"
+                  referrerPolicy="no-referrer"
+                />
+                <div className="flex-1 min-w-0">
+                  <h4 className="text-xs font-bold text-gray-800 dark:text-gray-100 truncate">{ser.titleFa}</h4>
+                  <p className="text-[10px] text-gray-400 mt-0.5 font-mono">{ser.titleEn} ({toPersianNums(ser.year)})</p>
+                  <p className="text-[10px] text-[#38bdf8] dark:text-sky-400 mt-1 font-semibold flex items-center gap-1">
+                    <span>{toPersianNums(ser.seasons.length)} فصل</span>
+                    <span>•</span>
+                    <span>{toPersianNums(ser.seasons.reduce((sum, s) => sum + s.episodes.length, 0))} قسمت کل</span>
+                  </p>
+                </div>
+                <div className="text-left font-mono">
+                  <span className="text-[10px] text-amber-500 font-bold bg-amber-500/10 px-1.5 py-0.5 rounded">
+                    ★ {toPersianNums(ser.imdbRating)}
+                  </span>
+                  <p className="text-[10px] font-bold text-emerald-500 mt-1.5">{formatCurrency(ser.salePrice)}</p>
+                </div>
+              </div>
+            ))}
+          </div>
+        </div>
+      </div>
+
+      {/* Latest Episode of Each Added Series (Request 1) */}
+      <div className="bg-white dark:bg-[#1e293b] p-5 rounded-xl border border-gray-150 dark:border-gray-800 shadow-sm space-y-4" id="dashboard-latest-episodes-panel">
+        <div className="flex items-center justify-between border-b border-gray-100 dark:border-gray-800 pb-2.5">
+          <div className="flex items-center gap-2">
+            <Tv className="w-4 h-4 text-emerald-500 animate-pulse" />
+            <h3 className="text-sm font-bold text-gray-800 dark:text-gray-100 font-sans">آخرین قسمت‌های اضافه‌شده از هر سریال</h3>
+          </div>
+          <span className="text-[9.5px] font-bold bg-emerald-50 dark:bg-emerald-950/30 text-emerald-600 dark:text-emerald-400 px-2 py-0.5 rounded-full border border-emerald-100 dark:border-emerald-900 font-mono">
+            بروزرسانی زنده
+          </span>
+        </div>
+
+        {lastEpisodesOfEachSeries.length === 0 ? (
+          <div className="text-xs text-gray-400 italic text-center py-6 font-sans">هیچ قسمتی برای سریال‌ها اضافه نشده است.</div>
+        ) : (
+          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4" id="latest-episodes-grid">
+            {lastEpisodesOfEachSeries.map(({ seriesItem, episode }, idx) => (
+              <div 
+                key={seriesItem.id + '-' + idx} 
+                className="p-3 bg-gray-50/50 dark:bg-slate-900/40 rounded-xl border border-gray-150 dark:border-gray-800 hover:border-gray-250 dark:hover:border-gray-750 transition flex flex-col justify-between space-y-3"
+              >
+                <div className="flex gap-3">
+                  <img 
+                    src={getSafePosterUrl(seriesItem.poster)} 
+                    alt={seriesItem.titleFa} 
+                    className="w-10 h-14 object-cover rounded shadow-sm bg-gray-100 shrink-0"
+                    referrerPolicy="no-referrer"
+                  />
+                  <div className="min-w-0 flex-1">
+                    <h4 className="text-xs font-bold text-gray-800 dark:text-white truncate">{seriesItem.titleFa}</h4>
+                    <span className="text-[9px] font-bold text-indigo-500 dark:text-indigo-400 bg-indigo-50 dark:bg-indigo-950/30 px-1.5 py-0.5 rounded inline-block mt-1">
+                      {episode.seasonName} • قسمت {toPersianNums(episode.episodeNumber)}
+                    </span>
+                    <p className="text-[10px] text-gray-500 dark:text-gray-400 truncate mt-1">عنوان قسمت: <strong className="text-gray-700 dark:text-gray-200 text-xs">{episode.name || 'بدون نام'}</strong></p>
+                  </div>
+                </div>
+
+                {episode.description && (
+                  <p className="text-[9.5px] text-gray-400 dark:text-gray-500 line-clamp-2 px-1 leading-relaxed">
+                    {episode.description}
+                  </p>
+                )}
+
+                <div className="flex items-center justify-between gap-1.5 border-t border-gray-100 dark:border-slate-800/80 pt-2 shrink-0" dir="rtl">
+                  <div className="flex gap-1.5">
+                    <button 
+                      onClick={() => handleQuickPlay(episode.videoPath, seriesItem.originPeerIp)}
+                      className="p-1.5 px-2 bg-emerald-600 hover:bg-emerald-700 text-white rounded-lg text-[9px] font-bold flex items-center gap-1 transition-all cursor-pointer shadow-sm"
+                      title="پخش سریع خروجی ویدیو"
+                    >
+                      <Play className="w-2.5 h-2.5" />
+                      <span>پخش</span>
+                    </button>
+                    <button 
+                      onClick={() => handleQuickOpenFolder(episode.videoPath, seriesItem.originPeerIp)}
+                      className="p-1.5 text-gray-650 dark:text-gray-400 hover:text-indigo-600 hover:bg-indigo-50 dark:hover:bg-slate-800 border border-gray-200 dark:border-gray-700 rounded-lg text-[9px] flex items-center gap-1 transition cursor-pointer"
+                      title="باز کردن پوشه این قسمت"
+                    >
+                      <FolderOpen className="w-2.5 h-2.5" />
+                      <span>پوشه فیزیکی</span>
+                    </button>
+                  </div>
+                  <button 
+                    onClick={() => onViewMedia('series', seriesItem.id)}
+                    className="text-[9px] font-bold text-gray-400 hover:text-indigo-500 transition cursor-pointer font-sans"
+                  >
+                    مدیریت کلی
+                  </button>
+                </div>
+              </div>
+            ))}
+          </div>
+        )}
       </div>
     </div>
   );

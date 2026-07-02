@@ -1,91 +1,313 @@
-@import url("https://cdn.jsdelivr.net/gh/rastikerdar/vazirmatn@v33.003/Vazirmatn-font-face.css");
+@import url('https://cdn.jsdelivr.net/gh/rastikerdar/vazirmatn@v33.003/Vazirmatn-font-face.css');
 @import "tailwindcss";
-
-@theme {
-  --font-sans: "Vazirmatn", ui-sans-serif, system-ui, sans-serif;
-}
 
 @variant dark (&:where(.dark, .dark *));
 
-body {
-  font-family: var(--font-sans);
-  background-color: rgb(248, 250, 252);
-  color: rgb(15, 23, 42);
-  transition-property: color, background-color, border-color, text-decoration-color, fill, stroke;
-  transition-timing-function: cubic-bezier(0.4, 0, 0.2, 1);
-  transition-duration: 200ms;
+/* AnjomanMax */
+@font-face {
+  font-family: "AnjomanMax";
+  src: url("../assets/fonts/AnjomanMax-Regular.woff2") format("woff2"),
+       url("../assets/fonts/AnjomanMax-Regular.woff") format("woff"),
+       url("../assets/fonts/AnjomanMax-Regular.ttf") format("truetype"),
+       url("../assets/fonts/AnjomanMax-Regular.eot") format("embedded-opentype"),
+       url("../assets/fonts/AnjomanMax-Regular.svg#AnjomanMax") format("svg");
+  font-weight: 400;
+  font-style: normal;
+  font-display: swap;
 }
 
-.dark body {
-  background-color: rgb(9, 15, 26);
-  color: rgb(248, 250, 252);
+@font-face {
+  font-family: "AnjomanMax";
+  src: url("../assets/fonts/AnjomanMax-Medium.woff2") format("woff2"),
+       url("../assets/fonts/AnjomanMax-Medium.woff") format("woff"),
+       url("../assets/fonts/AnjomanMax-Medium.ttf") format("truetype"),
+       url("../assets/fonts/AnjomanMax-Medium.eot") format("embedded-opentype"),
+       url("../assets/fonts/AnjomanMax-Medium.svg#AnjomanMax") format("svg");
+  font-weight: 500;
+  font-style: normal;
+  font-display: swap;
 }
 
-/* Hide number input spinners */
-.no-spinners::-webkit-outer-spin-button,
-.no-spinners::-webkit-inner-spin-button {
-  -webkit-appearance: none;
-  margin: 0;
-}
-.no-spinners {
-  -moz-appearance: textfield;
+@font-face {
+  font-family: "AnjomanMax";
+  src: url("../assets/fonts/AnjomanMax-Medium.woff2") format("woff2"),
+       url("../assets/fonts/AnjomanMax-Medium.woff") format("woff"),
+       url("../assets/fonts/AnjomanMax-Medium.ttf") format("truetype"),
+       url("../assets/fonts/AnjomanMax-Medium.eot") format("embedded-opentype"),
+       url("../assets/fonts/AnjomanMax-Medium.svg#AnjomanMax") format("svg");
+  font-weight: 700;
+  font-style: normal;
+  font-display: swap;
 }
 
-/* Print styles for perfect, margin-free high-fidelity official receipts/invoices */
-@media print {
-  /* Hide the entire React virtual DOM root and other non-print elements */
-  #root, .no-print, [role="dialog"], .fixed, .absolute, button, nav, header {
+/* IRANSansXFaNum */
+@font-face {
+  font-family: "IRANSansXFaNum";
+  src: url("../assets/fonts/IRANSansXFaNum-Regular.woff2") format("woff2"),
+       url("../assets/fonts/IRANSansXFaNum-Regular.woff") format("woff"),
+       url("../assets/fonts/IRANSansXFaNum-Regular.ttf") format("truetype");
+  font-weight: 400;
+  font-style: normal;
+  font-display: swap;
+}
+
+@font-face {
+  font-family: "IRANSansXFaNum";
+  src: url("../assets/fonts/IRANSansXFaNum-Bold.woff2") format("woff2"),
+       url("../assets/fonts/IRANSansXFaNum-Bold.woff") format("woff"),
+       url("../assets/fonts/IRANSansXFaNum-Bold.ttf") format("truetype");
+  font-weight: 700;
+  font-style: normal;
+  font-display: swap;
+}
+
+/* YekanBakh */
+@font-face {
+  font-family: "YekanBakh";
+  src: url("../assets/fonts/YekanBakh-Thin.woff2") format("woff2");
+  font-weight: 200;
+  font-style: normal;
+  font-display: swap;
+}
+
+@font-face {
+  font-family: "YekanBakh";
+  src: url("../assets/fonts/YekanBakh-Light.woff2") format("woff2");
+  font-weight: 300;
+  font-style: normal;
+  font-display: swap;
+}
+
+@font-face {
+  font-family: "YekanBakh";
+  src: url("../assets/fonts/YekanBakh-Regular.woff2") format("woff2");
+  font-weight: 400;
+  font-style: normal;
+  font-display: swap;
+}
+
+@font-face {
+  font-family: "YekanBakh";
+  src: url("../assets/fonts/YekanBakh-SemiBold.woff2") format("woff2");
+  font-weight: 600;
+  font-style: normal;
+  font-display: swap;
+}
+
+@font-face {
+  font-family: "YekanBakh";
+  src: url("../assets/fonts/YekanBakh-Bold.woff2") format("woff2");
+  font-weight: 700;
+  font-style: normal;
+  font-display: swap;
+}
+
+@font-face {
+  font-family: "YekanBakh";
+  src: url("../assets/fonts/YekanBakh-ExtraBold.woff2") format("woff2");
+  font-weight: 800;
+  font-style: normal;
+  font-display: swap;
+}
+
+@font-face {
+  font-family: "YekanBakh";
+  src: url("../assets/fonts/YekanBakh-Black.woff2") format("woff2");
+  font-weight: 900;
+  font-style: normal;
+  font-display: swap;
+}
+
+/* YekanBakhFaNum */
+@font-face {
+  font-family: "YekanBakhFaNum";
+  src: url("../assets/fonts/YekanBakhFaNum-Thin.woff2") format("woff2");
+  font-weight: 200;
+  font-style: normal;
+  font-display: swap;
+}
+
+@font-face {
+  font-family: "YekanBakhFaNum";
+  src: url("../assets/fonts/YekanBakhFaNum-Light.woff2") format("woff2");
+  font-weight: 300;
+  font-style: normal;
+  font-display: swap;
+}
+
+@font-face {
+  font-family: "YekanBakhFaNum";
+  src: url("../assets/fonts/YekanBakhFaNum-Regular.woff2") format("woff2");
+  font-weight: 400;
+  font-style: normal;
+  font-display: swap;
+}
+
+@font-face {
+  font-family: "YekanBakhFaNum";
+  src: url("../assets/fonts/YekanBakhFaNum-SemiBold.woff2") format("woff2");
+  font-weight: 600;
+  font-style: normal;
+  font-display: swap;
+}
+
+@font-face {
+  font-family: "YekanBakhFaNum";
+  src: url("../assets/fonts/YekanBakhFaNum-Bold.woff2") format("woff2");
+  font-weight: 700;
+  font-style: normal;
+  font-display: swap;
+}
+
+@font-face {
+  font-family: "YekanBakhFaNum";
+  src: url("../assets/fonts/YekanBakhFaNum-ExtraBold.woff2") format("woff2");
+  font-weight: 800;
+  font-style: normal;
+  font-display: swap;
+}
+
+@font-face {
+  font-family: "YekanBakhFaNum";
+  src: url("../assets/fonts/YekanBakhFaNum-Black.woff2") format("woff2");
+  font-weight: 900;
+  font-style: normal;
+  font-display: swap;
+}
+
+@theme {
+  --font-sans: "AnjomanMax", "Vazirmatn", "IRANSansXFaNum", "YekanBakhFaNum", "Tahoma", ui-sans-serif, system-ui, sans-serif;
+  --font-mono: "AnjomanMax", "Vazirmatn", "IRANSansXFaNum", "YekanBakhFaNum", ui-monospace, monospace;
+
+  --color-gray-150: #f1f5f9;
+  --color-gray-205: #e2e8f0;
+  --color-gray-450: #94a3b8;
+  --color-gray-505: #64748b;
+  --color-gray-705: #334155;
+  --color-gray-805: #1e293b;
+  --color-gray-850: #1e293b;
+}
+
+@layer base {
+  body {
+    @apply transition-colors duration-250 bg-gray-50 dark:bg-[#0f172a] text-gray-800 dark:text-gray-200 antialiased;
+    font-feature-settings: "ss01", "ss02", "cv11";
+  }
+
+  /* Beautiful layout custom scrollbar for that premium Electron appearance */
+  ::-webkit-scrollbar {
+    width: 8px;
+    height: 8px;
+  }
+  ::-webkit-scrollbar-track {
+    @apply bg-gray-100 dark:bg-[#111827];
+  }
+  ::-webkit-scrollbar-thumb {
+    @apply bg-gray-300 dark:bg-slate-800 rounded-md hover:bg-gray-400 dark:hover:bg-slate-700 transition-colors;
+  }
+}
+
+/* Animations subclasses */
+@keyframes fadeIn {
+  from { opacity: 0; transform: translateY(4px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+
+@keyframes scaleIn {
+  from { opacity: 0; transform: scale(0.97); }
+  to { opacity: 1; transform: scale(1); }
+}
+.select-all {
+    -webkit-user-select: unset !important;
+    user-select: unset !important;
+}
+.animate-fadeIn {
+  animation: fadeIn 0.2s cubic-bezier(0.16, 1, 0.3, 1) forwards;
+}
+
+.animate-scaleIn {
+  animation: scaleIn 0.25s cubic-bezier(0.34, 1.56, 0.64, 1) forwards;
+}
+
+.no-print {
+  @media print {
     display: none !important;
   }
+}
 
-  /* Make sure body and html are neutral and don't restrict size */
-  html, body {
-    width: 100% !important;
-    height: auto !important;
-    margin: 0 !important;
-    padding: 0 !important;
-    background: #ffffff !important;
-    color: #000000 !important;
-    overflow: visible !important;
+/* Scrollbar hiding convenience class */
+.scrollbar-none::-webkit-scrollbar {
+  display: none;
+}
+.scrollbar-none {
+  -ms-overflow-style: none;
+  scrollbar-width: none;
+}
+
+/* Electron Dragging Support for Frameless Titlebar */
+.electron-drag {
+  -webkit-app-region: drag;
+}
+
+.electron-no-drag {
+  -webkit-app-region: no-drag;
+}
+td.p-4.font-mono.font-bold.text-emerald-600.dark\:text-\[\#10b981\] {
+    font-family:  "AnjomanMax", "YekanBakhFaNum", "IRANSansXFaNum",'Vazirmatn';
+    font-size: 15px;
+}
+
+/* Force beautiful Persian font for html, body, and all standard text elements, inputs, selectors, and monospace numbers */
+html, body, div, span, p, h1, h2, h3, h4, h5, h6, label, input, select, textarea, button, .font-mono {
+  font-family:  "AnjomanMax", "YekanBakhFaNum", "IRANSansXFaNum", "Vazirmatn", "Tahoma", sans-serif !important;
+}
+button.px-4.py-1.bg-indigo-650.hover\:bg-indigo-700.text-white.rounded.text-\[10px\].font-bold.cursor-pointer.transition-colors {
+    background-color: #00a156;
+}
+.flex.justify-end.pt-1.gap-1\.5 {
+    direction: ltr;
+}
+button.text-\[9px\].font-extrabold.text-\[\#38bdf8\].bg-sky-600.hover\:bg-sky-550.text-white.dark\:bg-indigo-950\/40.dark\:hover\:bg-indigo-950\/60.px-2.py-0\.5.rounded.cursor-pointer.border.border-\[\#38bdf8\]\/10 {
+    height: 37px;
+    background-color: #d10d46;
+    font-size: 12px;
+}
+
+/* RTL Toast custom sliding animation keyframes */
+@keyframes slideInRightCustom {
+  from {
+    transform: translateX(100%);
+    opacity: 0;
   }
-
-  /* Force print background colors and shadows */
-  * {
-    -webkit-print-color-adjust: exact !important;
-    print-color-adjust: exact !important;
-  }
-
-  /* Set up the container for the cloned invoice at the document body level */
-  #print-temp-container {
-    display: block !important;
-    position: absolute !important;
-    left: 0 !important;
-    top: 0 !important;
-    width: 100% !important;
-    height: auto !important;
-    margin: 0 !important;
-    padding: 0 !important;
-    background: #ffffff !important;
-    box-shadow: none !important;
-    border: none !important;
-    visibility: visible !important;
-  }
-
-  #print-temp-container * {
-    visibility: visible !important;
-  }
-
-  /* Reset layout properties specifically within the printed target */
-  #print-temp-container > div {
-    margin: 0 auto !important;
-    box-shadow: none !important;
-    border: none !important;
-    page-break-inside: avoid !important;
+  to {
+    transform: translateX(0);
+    opacity: 1;
   }
 }
 
-/* Screen styles for the temporary printing container (must be completely hidden) */
-#print-temp-container {
-  display: none !important;
+@keyframes slideOutRightCustom {
+  from {
+    transform: translateX(0);
+    opacity: 1;
+  }
+  to {
+    transform: translateX(100%);
+    opacity: 0;
+  }
 }
 
+.animate-slice-in-right {
+  animation: slideInRightCustom 0.3s cubic-bezier(0.16, 1, 0.3, 1) forwards;
+}
+
+.animate-slice-out-right {
+  animation: slideOutRightCustom 0.3s cubic-bezier(0.16, 1, 0.3, 1) forwards;
+}
+
+/* Custom sweetalert style overrides to match dark themes and look incredibly high end */
+.rtl-toast {
+  direction: rtl !important;
+  text-align: right !important;
+  padding: 0.75rem 1rem !important;
+  margin-top: 50px !important; /* to stay safely below frameless header */
+}

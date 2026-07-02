@@ -1,339 +1,220 @@
-export interface Person {
-  id: number;
-  accounting_code: string;
-  first_name: string;
-  last_name: string;
-  title: string;
-  nickname: string;
-  type: 'حقیقی' | 'حقوقی';
-  category: string;
-  is_employee?: number;
-  is_shareholder?: number;
-  roles?: string[];
-  national_id?: string;
-  economic_code?: string;
-  registration_number?: string;
-  personal_code?: string;
-  credit_limit?: number;
-  tax_registered?: number | boolean;
-  address?: string;
-  country?: string;
-  city?: string;
-  postal_code?: string;
-  phone1?: string;
-  phone2?: string;
-  phone3?: string;
-  fax?: string;
-  email?: string;
-  website?: string;
-  bank_account?: string;
-  bank_card?: string;
-  bank_name?: string;
-  iban?: string;
-  birth_date?: string;
-  membership_date?: string;
-  marriage_date?: string;
-  description?: string;
-  avatar?: string;
-  created_at?: string;
-  updated_at?: string;
-  business_name?: string;
-  business_activity?: string;
-  business_address?: string;
-  brand?: string;
-  whatsapp?: string;
-  province?: string;
-  region?: string;
-  last_purchase?: string;
-  last_payment?: string;
-  last_activity?: string;
+/**
+ * @license
+ * SPDX-License-Identifier: Apache-2.0
+ */
+
+export type MediaCategory = string;
+
+export interface Movie {
+  id: string;
+  category: MediaCategory;
+  titleFa: string;
+  titleEn: string;
+  year: string;
+  director: string;
+  writer: string;
+  actors: string;
+  duration: string; // in minutes or text
+  country: string;
+  language: string;
+  imdbRating: string;
+  quality: string;
+  subtitle: string;
+  genres: string[]; // array of strings
+  poster: string; // unsplash image url or dataUri
+  summary: string;
+  officialSite?: string;
+  filePath: string;
+  purchasePrice: number;
+  salePrice: number;
+  addedAt: string;
+  gallery?: string[]; // screen shots gallery urls
+  originPeerIp?: string; // LAN IP of the system this movie is stored on
+  isPeerMedia?: boolean; // True if this movie belongs to a peer computer (System 2)
+  collectionName?: string; // Optional collection name (e.g., "Lord Of The Rings")
 }
 
-export interface PersonNote {
-  id: number;
-  person_id: number;
+export interface Episode {
+  id: string;
+  episodeNumber: number;
+  name: string;
+  videoPath: string;
   description: string;
-  followup_date?: string;
-  reminder?: string;
-  created_at?: string;
 }
 
-export interface Shareholder {
-  id: number;
-  name: string;
-  share_percent: number;
-  person_id?: number | null;
-  join_date?: string | null;
-  capital_contribution?: number;
-  shares_count?: number;
-  share_type?: string;
-  voting_rights?: number;
-  allocated_profit?: number;
-  avatar?: string;
-  national_id?: string;
-  phone1?: string;
-  accounting_code?: string;
-  email?: string;
+export interface Season {
+  id: string;
+  name: string; // e.g. "فصل اول"
+  episodes: Episode[];
 }
 
-export interface Seller {
-  id: number;
-  name: string;
-  person_id?: number | null;
-  commission_percent: number;
-  return_commission_percent: number;
+export interface Series {
+  id: string;
+  category: MediaCategory;
+  titleFa: string;
+  titleEn: string;
+  year: string;
+  director: string;
+  writer: string;
+  actors: string;
+  episodeDuration: string;
+  country: string;
+  language: string;
+  imdbRating: string;
+  quality: string;
+  subtitle: string;
+  genres: string[];
+  poster: string;
+  summary: string;
+  officialSite?: string;
+  filePath?: string; // root folder path of the TV series
+  purchasePrice: number; // base series purchase cost
+  salePrice: number; // base series complete sale price
+  seasons: Season[];
+  addedAt: string;
+  gallery?: string[];
+  releaseDay?: string; // e.g. "جمعه"
+  releaseTime?: string; // e.g. "22:00"
+  originPeerIp?: string; // LAN IP of the system peer where this is stored
+  isPeerMedia?: boolean; // True if this series belongs to a peer computer (System 2)
+  totalEpisodes?: number;
+  myEpisodesCount?: number;
+  releasedEpisodesCount?: number;
+  isEnded?: boolean;
+  isEndedText?: string;
+}
+
+export type SalesType = 'movie' | 'series_full' | 'series_season' | 'series_episode' | 'series_multi_episode';
+
+export interface CartItem {
+  id: string; // unique cart item id
+  mediaId: string; // reference to movie/series id
+  mediaTitle: string; // e.g. "تلقین" or "بازی مرکب"
+  mediaType: 'movie' | 'series';
+  salesType: SalesType;
+  details: string; // e.g. "فیلم سینمایی", "فروش کامل", "فصل ۱", "فصل ۱ - قسمت ۳"
+  filePath: string; // primary physical path (for opening folder)
+  videoPaths: string[]; // list of all associated physical files
+  purchasePrice: number; // item's backend base purchase price
+  salePrice: number; // customizable sale price
+}
+
+export interface CustomerSession {
+  id: string; // unique tab session id
+  customerName: string; // customer name or contact info
+  cart: CartItem[]; // customer's specific active shopping cart
+  selectedDrivePath?: string; // USB drive path for this customer
+}
+
+export interface Sale {
+  id: string;
+  date: string; // ISO timestamp
+  customerName: string;
+  mediaId: string; // movie or series id
+  mediaTitle: string; // title of original media
+  mediaType: 'movie' | 'series';
+  salesType: SalesType;
+  details: string; // e.g. "فروش کامل", "فصل ۲", "فصل ۱ - قسمت ۵"
+  purchasePrice: number; // logged at point-of-sale for profit calculation
+  salePrice: number; // actual amount sold for
+  discount: number; // discount amount in Tomans
+  items?: CartItem[]; // list of items in case of multi-item checkout
+}
+
+export interface DefaultPaths {
+  movies: string;
+  series: string;
+  backups: string;
+  music?: string;
+}
+
+export interface Song {
+  id: string;
+  titleFa: string;
+  titleEn?: string;
+  artist: string;
+  duration: number; // in seconds, e.g. 210
+  quality: string; // e.g. "320kbps", "128kbps"
+  filePath: string;
+  tags: string[]; // e.g. ["شاد", "ماشین", "پاپ"]
+  addedAt: string;
+}
+
+export interface MusicPlaylist {
+  id: string;
+  name: string; // e.g. "شاد"
   description?: string;
-  avatar?: string;
-  national_id?: string;
-  phone1?: string;
-  accounting_code?: string;
-  email?: string;
+  color?: string; // category tag badge colors for gorgeous presentation
 }
 
-export interface SystemUser {
-  id?: number;
-  username: string;
-  password?: string;
-  role: 'مدیر' | 'کاربر' | 'فروشنده' | 'کارمند';
-  permissions: string; // "*" or pages path delimited
-  person_id?: number | null;
-  first_name?: string;
-  last_name?: string;
-  title?: string;
-  accounting_code?: string;
+export interface AppSettings {
+  theme: 'light' | 'dark';
+  defaultPaths: DefaultPaths;
+  pageSize: 20 | 50 | 100;
+  defaultMoviePrice: number; // Single fixed sale price per movie copy (e.g., 2000 Tomans)
+  defaultSeriesPrice: number; // Single fixed sale price per series episode (e.g., 1500 Tomans)
+  defaultQuality?: string; // Add default quality option (e.g., "1080p BluRay")
+  shopName?: string;
+  shopAddress?: string;
+  shopPhone?: string;
+  shopPhoneSecondary?: string;
+  customCategories?: string[];
+  customQualities?: string[];
+  lanEnabled?: boolean;
+  lastPeerIp?: string;
+  tmdbApiKey?: string;
+  tmdbReadAccessToken?: string;
+  tmdbLanguage?: string;
+  tmdbIncludeAdult?: boolean;
 }
 
 declare global {
   interface Window {
     electronAPI?: {
-      addItem: (name: string) => Promise<number>;
-      getItems: () => Promise<{id: number, name: string, created_at: string}[]>;
-      getDbStats?: () => Promise<any>;
-      getDashboardData?: () => Promise<any>;
-      windowControl?: (command: string) => void;
-      changeDbPath?: () => Promise<{ success: boolean; path?: string; error?: string }>;
-      getConfig?: () => Promise<any>;
-      saveConfig?: (data: any) => Promise<any>;
-      addPerson?: (data: any) => Promise<{ success: boolean; id: number; accounting_code: string }>;
-      getPersons?: () => Promise<Person[]>;
-      updatePerson?: (data: any) => Promise<{ success: boolean }>;
-      deletePerson?: (id: number) => Promise<{ success: boolean }>;
-      getShareholders?: () => Promise<Shareholder[]>;
-      updateShareholder?: (data: any) => Promise<{ success: boolean }>;
-      addShareholderDirect?: (data: any) => Promise<{ success: boolean }>;
-      deleteShareholder?: (id: number) => Promise<{ success: boolean }>;
-      getShareholdersStatistics?: () => Promise<{ totalSales: number; totalProfit: number; totalExpenses: number; netIncome: number }>;
-
-      // Sellers
-      getSellers?: () => Promise<Seller[]>;
-      updateSeller?: (data: any) => Promise<{ success: boolean }>;
-      addSellerDirect?: (data: any) => Promise<{ success: boolean }>;
-      deleteSeller?: (id: number) => Promise<{ success: boolean }>;
-
-      // Onboarding
-      checkOnboardingStatus?: () => Promise<{ onboardingRequired: boolean; storeInfo: any }>;
-      performOnboarding?: (data: any) => Promise<{ success: boolean }>;
-
-      // Session / Authentications
-      loginUser?: (credentials: any) => Promise<{ success: boolean; message?: string; user?: any }>;
-      recoverPassword?: (data: any) => Promise<{ success: boolean; message?: string; password?: string }>;
-      getUserSecurityQuestion?: (username: string) => Promise<{ success: boolean; message?: string; question?: string }>;
-
-      // User Accounts
-      getSystemUsers?: () => Promise<SystemUser[]>;
-      saveUserAccount?: (data: any) => Promise<{ success: boolean }>;
-      deleteUserAccount?: (id: number) => Promise<{ success: boolean }>;
-      getAuditLogs?: () => Promise<any[]>;
-      addAuditLog?: (data: { username: string; action: string; target: string; details?: string; date?: string }) => Promise<{ success: boolean }>;
-
-      // Categories & Brands API
-      getCategories?: () => Promise<Category[]>;
-      saveCategory?: (data: any) => Promise<{ success: boolean; id: number }>;
-      deleteCategory?: (id: number) => Promise<{ success: boolean }>;
-      getBrands?: () => Promise<Brand[]>;
-      saveBrand?: (data: any) => Promise<{ success: boolean; id: number }>;
-      deleteBrand?: (id: number) => Promise<{ success: boolean }>;
-
-      // Employees API
-      getEmployees?: () => Promise<Employee[]>;
-      updateEmployee?: (data: any) => Promise<{ success: boolean }>;
-      addEmployeeDirect?: (data: any) => Promise<{ success: boolean; id: number }>;
-      deleteEmployee?: (id: number) => Promise<{ success: boolean }>;
-      getEmployeeTransactions?: (employeeId: number) => Promise<EmployeeTransaction[]>;
-      addEmployeeTransaction?: (data: any) => Promise<{ success: boolean; id: number }>;
-      deleteEmployeeTransaction?: (id: number) => Promise<{ success: boolean }>;
-
-      // Warehouses & Products API
-      selectLocalImage?: () => Promise<{ success: boolean; base64?: string; error?: string }>;
-      getProducts?: () => Promise<Product[]>;
-      saveProduct?: (data: any) => Promise<{ success: boolean; id: number }>;
-      deleteProduct?: (id: number) => Promise<{ success: boolean }>;
-      getWarehouses?: () => Promise<Warehouse[]>;
-      saveWarehouse?: (data: any) => Promise<{ success: boolean; id: number }>;
-      deleteWarehouse?: (id: number) => Promise<{ success: boolean }>;
-      getWarehouseStocks?: (warehouseId: number) => Promise<WarehouseStock[]>;
-      getInventoryHistory?: () => Promise<any[]>;
-      addWarehouseTransaction?: (data: any) => Promise<{ success: boolean; error?: string }>;
-      getProductSalesHistory?: (productId: number) => Promise<any[]>;
-      getProductPurchaseHistory?: (productId: number) => Promise<any[]>;
-      getProductInventoryCirculation?: (productId: number) => Promise<any[]>;
-
-       // Price updates & Audit trail API
-      applyPriceUpdate?: (data: any) => Promise<{ success: boolean; id: number }>;
-      getPriceUpdates?: () => Promise<any[]>;
-      getPriceUpdateItems?: (updateId: number) => Promise<any[]>;
-      rollbackPriceUpdate?: (updateId: number) => Promise<{ success: boolean }>;
-
-      // Invoices & Sales API
-      saveInvoice?: (data: any) => Promise<{ success: boolean; id?: number; error?: string; invoice_number?: string; profit?: number }>;
-      getInvoices?: () => Promise<Invoice[]>;
-      deleteInvoice?: (id: number) => Promise<{ success: boolean; error?: string }>;
-      saveReturn?: (data: any) => Promise<{ success: boolean; id?: number; error?: string; invoice_number?: string }>;
-
-      // Debtors and Creditors API
-      getDebtorsCreditorsSummary?: () => Promise<any[]>;
-      getPersonFinancialTransactions?: (personId: number) => Promise<any[]>;
-      addPersonFinancialTransaction?: (data: any) => Promise<{ success: boolean; id?: number; error?: string }>;
-      deletePersonFinancialTransaction?: (id: number) => Promise<{ success: boolean; error?: string }>;
-      getPersonNotes?: (personId: number) => Promise<PersonNote[]>;
-      addPersonNote?: (data: any) => Promise<{ success: boolean; id?: number; error?: string }>;
-      deletePersonNote?: (id: number) => Promise<{ success: boolean; error?: string }>;
-
-      // Cash and Bank APIs
-      getCashRegisters?: () => Promise<any[]>;
-      getBankAccounts?: () => Promise<any[]>;
-      addCashRegister?: (name: string) => Promise<{ success: boolean; id?: number; error?: string }>;
-      addBankAccount?: (data: any) => Promise<{ success: boolean; id?: number; error?: string }>;
-      getTreasuryTransactions?: () => Promise<any[]>;
-      addTreasuryTransaction?: (data: any) => Promise<{ success: boolean; id?: number; error?: string }>;
-      deleteTreasuryTransaction?: (id: number) => Promise<{ success: boolean; error?: string }>;
-    }
+      minimizeWindow: () => Promise<boolean>;
+      maximizeWindow: () => Promise<boolean>;
+      closeWindow: () => Promise<boolean>;
+      openFileInExplorer: (filepath: string, originPeerIp?: string) => Promise<{ success: boolean; error?: string }>;
+      playVideoFile: (filepath: string, originPeerIp?: string) => Promise<{ success: boolean; error?: string }>;
+      openFolderDirectory: (dirpath: string, originPeerIp?: string) => Promise<{ success: boolean; error?: string }>;
+      selectFile: (filters?: { name: string; extensions: string[] }[]) => Promise<string | null>;
+      selectPoster: () => Promise<string | null>;
+      selectDirectory: () => Promise<any>;
+      readDbFile: () => Promise<any>;
+      writeDbFile: (fullData: any) => Promise<{ success: boolean; error?: string }>;
+      getDbFilePath: () => Promise<string>;
+      setSqliteDbPath?: (newPath: string) => Promise<{ success: boolean; path?: string; error?: string }>;
+      runSql: (sql: string, params?: any[]) => Promise<{ success: boolean; rows?: any[]; error?: string; lastID?: number; changes?: number }>;
+      isSqliteAvailable: () => Promise<boolean>;
+      fetchUrlData?: (url: string, options?: { timeout?: number }) => Promise<{ success: boolean; data?: any; error?: string }>;
+      savePosterLocal?: (imageUrl: string, destFolder: string, filename: string) => Promise<{ success: boolean; savedPath?: string; error?: string }>;
+      existsFile?: (filepath: string) => Promise<{ success: boolean; exists: boolean; error?: string }>;
+      resolveVideoPath?: (basePathWithoutExt: string) => Promise<{ success: boolean; resolvedPath: string; ext: string; error?: string }>;
+      scanSeriesDirectory?: (dirpath: string) => Promise<{ success: boolean; files?: Array<{ name: string; path: string; ext: string; size: number }>; error?: string }>;
+      scanMediaDirectory?: (dirpath: string) => Promise<{ success: boolean; files?: Array<{ filename: string; fullPath: string; extension: string; folder: string; size: number; modifiedDate: string }>; error?: string }>;
+      getLocalIps?: () => Promise<string[]>;
+      downloadLanFile?: (url: string, destPath: string) => Promise<{ success: boolean; error?: string }>;
+      copyFileToUsb?: (sourcePath: string, destDir: string, id: string) => Promise<{ success: boolean; destPath?: string; error?: string }>;
+      onCopyProgress?: (callback: (data: { id: string; progress: number; bytesCopied: number; totalBytes: number; speedMbs: number; completed?: boolean; error?: string }) => void) => void;
+      onDownloadProgress?: (callback: (data: any) => void) => void;
+    };
   }
 }
 
-export interface Product {
-  id: number;
-  name: string;
-  code: string;
-  price: number;
-  cost: number;
-  category_id?: number | null;
-  category_name?: string;
-  brand_id?: number | null;
-  brand_name?: string;
-  total_stock: number;
-  unit: string;
-  description?: string;
-  internal_sku?: string;
-  serial_number?: string;
-  image_base64?: string;
-  type?: 'product' | 'service';
-  required_docs?: string;
-  barcode?: string;
-  min_stock?: number;
-  wholesale_price?: number;
-  min_selling_price?: number;
-  status?: string;
+export function getSafePosterUrl(poster: string | undefined | null): string {
+  if (!poster) return 'https://images.unsplash.com/photo-1522869635100-9f4c5e86aa37?auto=format&fit=crop&q=80&w=400';
+  if (poster.startsWith('http://') || poster.startsWith('https://') || poster.startsWith('data:')) {
+    return poster;
+  }
+  // If it's a local path (either starts with a drive letter or has backslashes)
+  let formatted = poster.replace(/\\/g, '/');
+  if (!formatted.startsWith('file:///')) {
+    if (formatted.startsWith('/')) {
+      formatted = 'file://' + formatted;
+    } else {
+      formatted = 'file:///' + formatted;
+    }
+  }
+  return formatted;
 }
 
-export interface Warehouse {
-  id: number;
-  name: string;
-  code: string;
-  address?: string;
-  description?: string;
-  total_items?: number;
-  unique_products?: number;
-}
-
-export interface WarehouseStock {
-  id: number;
-  warehouse_id: number;
-  product_id: number;
-  quantity: number;
-  product_name: string;
-  product_code: string;
-  unit: string;
-  price: number;
-  cost: number;
-}
-
-export interface Category {
-  id: number;
-  name: string;
-  parent_id?: number | null;
-  image?: string;
-  description?: string;
-  type?: 'product' | 'service' | 'both';
-  parent_name?: string;
-}
-
-export interface Brand {
-  id: number;
-  name: string;
-  logo?: string;
-  description?: string;
-}
-
-export interface Employee {
-  id: number;
-  name: string;
-  phone?: string;
-  position?: string;
-  salary: number;
-  person_id?: number | null;
-  hire_date?: string;
-  avatar?: string;
-  national_id?: string;
-  accounting_code?: string;
-  balance?: number;
-}
-
-export interface EmployeeTransaction {
-  id: number;
-  employee_id: number;
-  date: string;
-  type: 'salary_accrual' | 'cash_advance' | 'item_pickup' | 'fine_deduction' | 'bonus';
-  amount: number;
-  item_name?: string;
-  description?: string;
-}
-
-export interface Invoice {
-  id?: number;
-  invoice_number: string;
-  customer_id?: number | null;
-  customer_name?: string;
-  customer_phone?: string;
-  date: string;
-  total_amount: number;
-  discount: number;
-  tax: number;
-  final_amount: number;
-  status: string; // 'پرداخت شده' | 'پرداخت نشده' | 'لغو شده'
-  payment_method: string; // 'کارتخوان' | 'نقدی' | 'کارت به کارت' | 'واریز به حساب' | 'چکی' | 'اقساطی'
-  payment_details?: string; // JSON holding detailed metadata
-  description?: string;
-  items?: InvoiceItem[];
-  payment_cash?: number;
-  payment_card?: number;
-  payment_bank?: number;
-  payment_cheque?: number;
-  payment_credit?: number;
-  payment_installment?: number;
-}
-
-export interface InvoiceItem {
-  id?: number;
-  invoice_id?: number;
-  product_id: number;
-  product_name?: string;
-  product_code?: string;
-  product_unit?: string;
-  type?: 'product' | 'service';
-  quantity: number;
-  unit_price: number;
-  total: number;
-  discount_percent?: number;
-  discount_amount?: number;
-}

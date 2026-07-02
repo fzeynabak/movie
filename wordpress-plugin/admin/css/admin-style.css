@@ -1,0 +1,259 @@
+/**
+ * ParsTech Media Center Sync - Admin Style Sheet
+ * Author: کافه کلیک
+ * Description: کاملاً ریسپانسیو و بهینه‌سازی‌شده برای زبان شیرین فارسی (RTL) همراه با افکت‌های مدرن CSS
+ */
+
+:root {
+    --pt-primary: #4f46e5;
+    --pt-primary-hover: #4338ca;
+    --pt-success: #10b981;
+    --pt-success-bg: #ecfdf5;
+    --pt-success-border: #a7f3d0;
+    --pt-warning: #f59e0b;
+    --pt-warning-bg: #fffbeb;
+    --pt-danger: #ef4444;
+    --pt-dark: #1e293b;
+    --pt-gray-50: #f8fafc;
+    --pt-gray-100: #f1f5f9;
+    --pt-gray-200: #e2e8f0;
+    --pt-gray-500: #64748b;
+    --pt-gray-700: #334155;
+    --pt-radius-lg: 16px;
+    --pt-radius-md: 10px;
+}
+
+.parstech-wp-container {
+    font-family: "Inter", "Vazir", "Tahoma", sans-serif;
+    direction: rlt !important;
+    text-align: right !important;
+    margin: 20px 20px 20px 0;
+    padding-left: 20px;
+}
+
+/* Base Cards */
+.parstech-card {
+    background: #ffffff;
+    border: 1px solid var(--pt-gray-200);
+    border-radius: var(--pt-radius-lg);
+    box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.02), 0 2px 4px -1px rgba(0, 0, 0, 0.01);
+    padding: 24px;
+    margin-bottom: 24px;
+    transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+}
+
+.parstech-card:hover {
+    box-shadow: 0 10px 15px -3px rgba(0, 0, 0, 0.04), 0 4px 6px -2px rgba(0, 0, 0, 0.02);
+    transform: translateY(-2px);
+}
+
+/* Header style and branding banner */
+.parstech-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    margin-bottom: 24px;
+    border-bottom: 1px solid var(--pt-gray-200);
+    padding-bottom: 16px;
+}
+
+.parstech-header h1 {
+    font-weight: 900;
+    font-size: 24px;
+    color: var(--pt-dark);
+    margin: 0;
+}
+
+.parstech-header p {
+    color: var(--pt-gray-500);
+    font-size: 13px;
+    margin: 4px 0 0 0;
+}
+
+/* Stats Badges */
+.pt-badge {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    padding: 4px 10px;
+    border-radius: 9999px;
+    font-size: 11px;
+    font-weight: 700;
+}
+
+.pt-badge-success {
+    background-color: var(--pt-success-bg);
+    color: #065f46;
+}
+
+.pt-badge-offline {
+    background-color: var(--pt-gray-100);
+    color: var(--pt-gray-500);
+}
+
+/* Stat Widget Cards */
+.parstech-stat-number {
+    font-size: 34px;
+    font-weight: 800;
+    color: var(--pt-primary);
+    line-height: 1.2;
+    margin-top: 4px;
+}
+
+.parstech-stat-title {
+    color: var(--pt-gray-500);
+    font-size: 11.5px;
+    font-weight: bold;
+    margin: 0;
+}
+
+.parstech-stat-icon {
+    font-size: 24px;
+    padding: 12px;
+    border-radius: 12px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    width: 48px;
+    height: 48px;
+}
+
+/* Two Column Grid Page Layout */
+.wp-layout-grid {
+    display: grid;
+    grid-template-columns: 2fr 1fr;
+    gap: 24px;
+}
+
+@media (max-width: 1024px) {
+    .wp-layout-grid {
+        grid-template-columns: 1fr;
+    }
+}
+
+/* Modern Data Table Styling */
+.parstech-table-wrapper {
+    overflow-x: auto;
+    border-radius: var(--pt-radius-md);
+    border: 1px solid var(--pt-gray-200);
+}
+
+.parstech-table {
+    width: 100%;
+    border-collapse: collapse;
+    text-align: right;
+}
+
+.parstech-table th {
+    background-color: var(--pt-gray-50);
+    padding: 14px 16px;
+    font-weight: bold;
+    color: var(--pt-gray-700);
+    border-bottom: 2px solid var(--pt-gray-200);
+    font-size: 12px;
+}
+
+.parstech-table td {
+    padding: 14px 16px;
+    border-bottom: 1px solid var(--pt-gray-100);
+    font-size: 12.5px;
+    color: #334155;
+    vertical-align: middle;
+}
+
+.parstech-table tr:hover td {
+    background-color: var(--pt-gray-50)/10;
+}
+
+/* Input Styles */
+.form-input-group {
+    margin-bottom: 16px;
+}
+
+.form-input-group label {
+    display: block;
+    font-size: 11.5px;
+    font-weight: bold;
+    color: var(--pt-gray-700);
+    margin-bottom: 6px;
+}
+
+.parstech-input {
+    width: 100%;
+    border: 1px solid var(--pt-gray-200);
+    border-radius: 8px;
+    padding: 10px 14px;
+    font-size: 12.5px;
+    transition: all 0.2s;
+    background-color: var(--pt-gray-50);
+}
+
+.parstech-input:focus {
+    border-color: var(--pt-primary);
+    background-color: #ffffff;
+    box-shadow: 0 0 0 3px rgba(79, 70, 229, 0.1);
+    outline: none;
+}
+
+.parstech-textarea {
+    width: 100%;
+    min-height: 120px;
+    border: 1px solid var(--pt-gray-200);
+    border-radius: 8px;
+    padding: 10px 14px;
+    font-size: 12.5px;
+    line-height: 1.6;
+    background-color: var(--pt-gray-50);
+    resize: vertical;
+}
+
+.parstech-textarea:focus {
+    border-color: var(--pt-primary);
+    background-color: #ffffff;
+    box-shadow: 0 0 0 3px rgba(79, 70, 229, 0.1);
+    outline: none;
+}
+
+/* Button UI */
+.parstech-btn {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    gap: 8px;
+    border-radius: 8px;
+    padding: 10px 20px;
+    font-size: 12px;
+    font-weight: bold;
+    border: none;
+    cursor: pointer;
+    transition: all 0.2s;
+    text-decoration: none;
+}
+
+.parstech-btn-primary {
+    background-color: var(--pt-primary);
+    color: #ffffff !important;
+}
+
+.parstech-btn-primary:hover {
+    background-color: var(--pt-primary-hover);
+}
+
+.parstech-btn-success {
+    background-color: var(--pt-success);
+    color: #ffffff !important;
+}
+
+.parstech-btn-success:hover {
+    background-color: #059669;
+}
+
+.parstech-btn-secondary {
+    background-color: #f1f5f9;
+    color: #475569 !important;
+    border: 1px solid #cbd5e1;
+}
+
+.parstech-btn-secondary:hover {
+    background-color: #e2e8f0;
+}

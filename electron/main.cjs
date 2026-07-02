@@ -1,3287 +1,2528 @@
-const { app, BrowserWindow, ipcMain } = require('electron');
+const { app, BrowserWindow, ipcMain, dialog, shell, Tray, Menu, nativeImage } = require('electron');
 const path = require('path');
 const fs = require('fs');
 
-let db;
-let configPath;
+// Ensure a single instance lock
+const gotTheLock = app.requestSingleInstanceLock();
+if (!gotTheLock) {
+  app.quit();
+} else {
+  app.on('second-instance', (event, commandLine, workingDirectory) => {
+    // If someone tried to run a second instance, focus our main window
+    if (mainWindow) {
+      if (mainWindow.isMinimized()) mainWindow.restore();
+      if (!mainWindow.isVisible()) mainWindow.show();
+      mainWindow.focus();
+    }
+  });
+}
 
-function loadConfig() {
-  configPath = path.join(app.getPath('userData'), 'config.json');
-  let config = { 
-    dbPath: path.join(app.getPath('userData'), 'database.sqlite'),
-    accCodeStart: 1000,
-    accCodeSuffix: '-ACC',
-    productPrefix: 'PRD-',
-    productStartNumber: 1001
-  };
+// Ensure there is an icon file. If assets/icon.png is missing, write a base64 encoded PNG.
+function ensureIconExists() {
+  if (app.isPackaged) {
+    return; // NEVER attempt to write inside packaged apps (ASAR is read-only)
+  }
+  const assetsDir = path.join(__dirname, '../assets');
+  const iconPath = path.join(assetsDir, 'icon.png');
   
-  if (fs.existsSync(configPath)) {
+  if (!fs.existsSync(assetsDir)) {
     try {
-      const savedConfig = JSON.parse(fs.readFileSync(configPath, 'utf8'));
-      config = { ...config, ...savedConfig };
+      fs.mkdirSync(assetsDir, { recursive: true });
     } catch (e) {
-      console.error('Error reading config:', e);
+      console.error('Failed to create assets directory:', e);
     }
   }
-  return config;
-}
-
-function saveConfig(newConfig) {
-  const config = { ...loadConfig(), ...newConfig };
-  try {
-    fs.writeFileSync(configPath, JSON.stringify(config, null, 2));
-  } catch(e) {
-    console.error('Error writing config:', e);
-  }
-  return config;
-}
-
-function initializeDatabase() {
-  try {
-    const config = loadConfig();
-    const Database = require('better-sqlite3');
-    // ذخیره دیتابیس در مسیر تعریف شده در کانفیگ
-    const dbPath = config.dbPath;
-    console.log('Database path:', dbPath); // برای دیباگ مسیر
-    
-    db = new Database(dbPath);
-    
-    // ایجاد جداول اصلی دیتابیس
-    db.exec(`
-      CREATE TABLE IF NOT EXISTS test_items (
-        id INTEGER PRIMARY KEY AUTOINCREMENT,
-        name TEXT NOT NULL,
-        created_at DATETIME DEFAULT CURRENT_TIMESTAMP
-      );
-
-      CREATE TABLE IF NOT EXISTS categories (
-        id INTEGER PRIMARY KEY AUTOINCREMENT,
-        name TEXT NOT NULL,
-        parent_id INTEGER DEFAULT NULl,
-        FOREIGN KEY (parent_id) REFERENCES categories (id)
-      );
-
-      CREATE TABLE IF NOT EXISTS products (
-        id INTEGER PRIMARY KEY AUTOINCREMENT,
-        name TEXT NOT NULL,
-        code TEXT,
-        price REAL DEFAULT 0,
-        cost REAL DEFAULT 0,
-        category_id INTEGER,
-        stock REAL DEFAULT 0,
-        unit TEXT,
-        description TEXT,
-        FOREIGN KEY (category_id) REFERENCES categories (id)
-      );
-
-      CREATE TABLE IF NOT EXISTS services (
-        id INTEGER PRIMARY KEY AUTOINCREMENT,
-        name TEXT NOT NULL,
-        price REAL DEFAULT 0,
-        description TEXT
-      );
-
-      CREATE TABLE IF NOT EXISTS persons (
-        id INTEGER PRIMARY KEY AUTOINCREMENT,
-        accounting_code TEXT UNIQUE,
-        first_name TEXT,
-        last_name TEXT,
-        title TEXT,
-        nickname TEXT,
-        type TEXT,
-        category TEXT,
-        national_id TEXT,
-        economic_code TEXT,
-        registration_number TEXT,
-        personal_code TEXT,
-        credit_limit REAL DEFAULT 0,
-        tax_registered INTEGER,
-        address TEXT,
-        country TEXT,
-        city TEXT,
-        postal_code TEXT,
-        phone1 TEXT,
-        phone2 TEXT,
-        phone3 TEXT,
-        fax TEXT,
-        email TEXT,
-        website TEXT,
-        bank_account TEXT,
-        bank_card TEXT,
-        bank_name TEXT,
-        iban TEXT,
-        birth_date TEXT,
-        membership_date TEXT,
-        marriage_date TEXT,
-        description TEXT,
-        created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
-        updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
-      );
-
-      CREATE TABLE IF NOT EXISTS customers (
-        id INTEGER PRIMARY KEY AUTOINCREMENT,
-        name TEXT NOT NULL,
-        phone TEXT,
-        address TEXT,
-        national_id TEXT,
-        type TEXT DEFAULT 'حقیقی',
-        person_id INTEGER
-      );
-
-      CREATE TABLE IF NOT EXISTS employees (
-        id INTEGER PRIMARY KEY AUTOINCREMENT,
-        name TEXT NOT NULL,
-        phone TEXT,
-        position TEXT,
-        salary REAL DEFAULT 0,
-        person_id INTEGER,
-        hire_date TEXT
-      );
-
-      CREATE TABLE IF NOT EXISTS shareholders (
-        id INTEGER PRIMARY KEY AUTOINCREMENT,
-        name TEXT NOT NULL,
-        share_percent REAL DEFAULT 0,
-        person_id INTEGER,
-        join_date TEXT
-      );
-
-      CREATE TABLE IF NOT EXISTS invoices (
-        id INTEGER PRIMARY KEY AUTOINCREMENT,
-        invoice_number TEXT NOT NULL UNIQUE,
-        customer_id INTEGER,
-        date DATETIME DEFAULT CURRENT_TIMESTAMP,
-        total_amount REAL DEFAULT 0,
-        discount REAL DEFAULT 0,
-        tax REAL DEFAULT 0,
-        final_amount REAL DEFAULT 0,
-        status TEXT DEFAULT 'پرداخت نشده',
-        FOREIGN KEY (customer_id) REFERENCES persons (id)
-      );
-
-      CREATE TABLE IF NOT EXISTS invoice_items (
-        id INTEGER PRIMARY KEY AUTOINCREMENT,
-        invoice_id INTEGER NOT NULL,
-        product_id INTEGER,
-        quantity REAL DEFAULT 1,
-        unit_price REAL DEFAULT 0,
-        total REAL DEFAULT 0,
-        FOREIGN KEY (invoice_id) REFERENCES invoices (id),
-        FOREIGN KEY (product_id) REFERENCES products (id)
-      );
-
-      CREATE TABLE IF NOT EXISTS inventory (
-        id INTEGER PRIMARY KEY AUTOINCREMENT,
-        product_id INTEGER NOT NULL,
-        quantity_change REAL NOT NULL,
-        type TEXT NOT NULL,
-        date DATETIME DEFAULT CURRENT_TIMESTAMP,
-        description TEXT,
-        FOREIGN KEY (product_id) REFERENCES products (id)
-      );
-
-      CREATE TABLE IF NOT EXISTS users (
-        id INTEGER PRIMARY KEY AUTOINCREMENT,
-        username TEXT NOT NULL UNIQUE,
-        password TEXT NOT NULL,
-        role TEXT DEFAULT 'کاربر',
-        permissions TEXT
-      );
-
-      CREATE TABLE IF NOT EXISTS sellers (
-        id INTEGER PRIMARY KEY AUTOINCREMENT,
-        name TEXT NOT NULL,
-        person_id INTEGER UNIQUE,
-        commission_percent REAL DEFAULT 0,
-        return_commission_percent REAL DEFAULT 0,
-        description TEXT,
-        FOREIGN KEY (person_id) REFERENCES persons (id)
-      );
-
-      CREATE TABLE IF NOT EXISTS store_info (
-        id INTEGER PRIMARY KEY,
-        name TEXT,
-        address TEXT,
-        phone TEXT,
-        logo TEXT,
-        description TEXT
-      );
-
-      CREATE TABLE IF NOT EXISTS audit_logs (
-        id INTEGER PRIMARY KEY AUTOINCREMENT,
-        username TEXT NOT NULL,
-        action TEXT NOT NULL,
-        target TEXT NOT NULL,
-        details TEXT,
-        date TEXT
-      );
-    `);
-
-    // Dynamic schema updates
+  
+  if (!fs.existsSync(iconPath)) {
+    // High-contrast 32x32 play icon in base64: Royal Indigo background, golden play button.
+    const base64Png = 
+      'iVBORw0KGgoAAAANSUhEUgAAACAAAAAgCAYAAABzenr0AAAABGdBTUEAALGPC/xhBQAAACBjSFJNAAB6JgAAgIQAAPoAAACA6AAAdTAAAOpgAAA6mAAAF3CculE8AAAACXBIWXMAABYlAAAWJQFJUiTwAAAC70lEQVRYR8WWT0gUYRjGf7O77qrrurv+qa6uu6GlYZZhhgVhdBAq6NBBOnXo0Cno0Cno0ClE6NChU4fO0S09WFiEERFhdMvUNV3X3V39reuvu7M70/eNLbNuuus66M6Hh2He98fvvO/7PT+S67punmN92lVjV0Y/N4C6WpI6A0iE0D1C6F8pDoB4CI4QSkSgXpXigNgeofZIdS7FAeI+mD1CPUTYQz9W4kBiH9A9Vf88xSFSf0Y9Ctw8xSGe6YtZg8g2YXs95O8T9NlVf4LgE6n2I9sB/v2oT6g2YHsN9REoDgg+keoxYBtAn4/m76v+JMUnUnUu1F2gT666G+h/4mVA/8tTDbBGYLqO7C9BDo86DuA/o8qHsgvAnVfUQbyDehfwHj67h+3I/XgHED6mNQHwOfUHQgXgdUj8D4BvYfIP8F/Duo/mUvI/b3gY7iM4Yn8T9g8fIeA3rG2DHgU6G+F+oXMN8Hag3UDyA+gPoRxEdIpxHeRNiBeD/6NMD4GzD/COovUD8TzbyrT6R6AnQStfIUrZ7I9X5bX9pXgDoH9XmGcxS/DORC6N/AtGf080Anqf4C+Z7S2xZgYsh2KDuE6rcoPYX6Hsw0mC9A/ULx5VgnZ9k3yv5C7R/gvyv9Lco/wHypsN8K/2mNf1H+d+U/gPrUshN0BvRZw3pG7xn6W6GfF/YLa5Y9A/r0sntGP0HpHKizsPrssE8H+2zZp4f1l1Z/ZfVJgN4H43WpP0fxeRifj+ovofos9BeL9UWD9VqD9TqH9dqY9dqS9dqL9XoL0730ehp/F+rdE9brefzdg/X6Bv+WUHwT+rcG/zZQ/A7K8S3onvXF9/v1f9/Bv98P7w/m9oDZDf005mG+S7v9k6L3Yf1e56m/lGqvpNo7qfar0r1R9kFf/99Uex9pC8T8gZz6w6gHifUgp34oPkhsANgYpD6M9BBUHya/EfoQqL6k7INofUTYfUnZByH8ofUHYfdh6WGo3g/h92Hp/Sg9hNoHqfUgtB6ktv6v+gGzU+u3u4N6CgAAAABJRU5ErkJggg==';
     try {
-      // Check if invoices is referencing customers
-      if (db) {
-        const fks = db.prepare("PRAGMA foreign_key_list(invoices)").all();
-        const hasCustomersFk = fks.some(fk => fk.table === 'customers');
-        if (hasCustomersFk) {
-          console.log("Migrating invoices foreign key from customers to persons...");
-          db.exec("PRAGMA foreign_keys = OFF;");
-          
-          // 1. Create invoices_new table
-          db.exec(`
-            CREATE TABLE IF NOT EXISTS invoices_new (
-              id INTEGER PRIMARY KEY AUTOINCREMENT,
-              invoice_number TEXT NOT NULL UNIQUE,
-              customer_id INTEGER,
-              date DATETIME DEFAULT CURRENT_TIMESTAMP,
-              total_amount REAL DEFAULT 0,
-              discount REAL DEFAULT 0,
-              tax REAL DEFAULT 0,
-              final_amount REAL DEFAULT 0,
-              status TEXT DEFAULT 'پرداخت نشده',
-              payment_method TEXT DEFAULT 'کارتخوان',
-              payment_details TEXT,
-              description TEXT,
-              FOREIGN KEY (customer_id) REFERENCES persons (id)
-            );
-          `);
-          
-          // 2. See if invoices exists, copy data
-          const cols = db.prepare("PRAGMA table_info(invoices)").all().map(c => c.name);
-          const hasPaymentMethod = cols.includes('payment_method');
-          const hasPaymentDetails = cols.includes('payment_details');
-          const hasDescription = cols.includes('description');
-          
-          const sourceCols = ['id', 'invoice_number', 'customer_id', 'date', 'total_amount', 'discount', 'tax', 'final_amount', 'status'];
-          if (hasPaymentMethod) sourceCols.push('payment_method');
-          if (hasPaymentDetails) sourceCols.push('payment_details');
-          if (hasDescription) sourceCols.push('description');
-          
-          const columnsStr = sourceCols.join(', ');
-          
-          db.exec(`INSERT INTO invoices_new (${columnsStr}) SELECT ${columnsStr} FROM invoices;`);
-          
-          // 3. Drop invoices table
-          db.exec("DROP TABLE invoices;");
-          
-          // 4. Rename invoices_new to invoices
-          db.exec("ALTER TABLE invoices_new RENAME TO invoices;");
-          
-          db.exec("PRAGMA foreign_keys = ON;");
-          console.log("invoices foreign key migration completed successfully!");
-        }
-      }
+      fs.writeFileSync(iconPath, Buffer.from(base64Png, 'base64'));
+      console.log('Successfully generated default/fallback icon.png at:', iconPath);
     } catch (e) {
-      console.error("Failed to migrate invoices table:", e);
-      try { db.exec("PRAGMA foreign_keys = ON;"); } catch(_) {}
+      console.error('Failed to write default icon.png:', e);
     }
-
-    try { db.prepare('ALTER TABLE employees ADD COLUMN person_id INTEGER').run(); } catch(e) {}
-    try { db.prepare('ALTER TABLE employees ADD COLUMN hire_date TEXT').run(); } catch(e) {}
-    try { db.prepare('ALTER TABLE shareholders ADD COLUMN person_id INTEGER').run(); } catch(e) {}
-    try { db.prepare('ALTER TABLE shareholders ADD COLUMN join_date TEXT').run(); } catch(e) {}
-    try { db.prepare('ALTER TABLE customers ADD COLUMN person_id INTEGER').run(); } catch(e) {}
-    try { db.prepare('ALTER TABLE persons ADD COLUMN avatar TEXT').run(); } catch(e) {}
-    try { db.prepare('ALTER TABLE shareholders ADD COLUMN capital_contribution REAL DEFAULT 0').run(); } catch(e) {}
-    try { db.prepare('ALTER TABLE shareholders ADD COLUMN shares_count INTEGER DEFAULT 0').run(); } catch(e) {}
-    try { db.prepare('ALTER TABLE shareholders ADD COLUMN share_type TEXT DEFAULT "عادی"').run(); } catch(e) {}
-    try { db.prepare('ALTER TABLE shareholders ADD COLUMN voting_rights INTEGER DEFAULT 1').run(); } catch(e) {}
-    try { db.prepare('ALTER TABLE shareholders ADD COLUMN allocated_profit REAL DEFAULT 0').run(); } catch(e) {}
-    try { db.prepare('ALTER TABLE users ADD COLUMN recovery_question TEXT').run(); } catch(e) {}
-    try { db.prepare('ALTER TABLE users ADD COLUMN recovery_answer TEXT').run(); } catch(e) {}
-    try { db.prepare('ALTER TABLE users ADD COLUMN person_id INTEGER').run(); } catch(e) {}
-    try { db.prepare('ALTER TABLE invoices ADD COLUMN payment_method TEXT DEFAULT "کارتخوان"').run(); } catch(e) {}
-    try { db.prepare('ALTER TABLE invoices ADD COLUMN payment_details TEXT').run(); } catch(e) {}
-    try { db.prepare('ALTER TABLE invoices ADD COLUMN description TEXT').run(); } catch(e) {}
-    try { db.prepare("ALTER TABLE invoices ADD COLUMN type TEXT DEFAULT 'فروش'").run(); } catch(e) {}
-    try { db.prepare("ALTER TABLE invoices ADD COLUMN received_amount REAL DEFAULT 0").run(); } catch(e) {}
-
-    // Categories safe schema extension
-    try { db.prepare('ALTER TABLE categories ADD COLUMN image TEXT').run(); } catch(e) {}
-    try { db.prepare('ALTER TABLE categories ADD COLUMN description TEXT').run(); } catch(e) {}
-    try { db.prepare("ALTER TABLE categories ADD COLUMN type TEXT DEFAULT 'both'").run(); } catch(e) {}
-
-    // Create brands table
-    try {
-      db.exec(`
-        CREATE TABLE IF NOT EXISTS brands (
-          id INTEGER PRIMARY KEY AUTOINCREMENT,
-          name TEXT NOT NULL,
-          logo TEXT,
-          description TEXT
-        );
-      `);
-    } catch(e) {}
-
-    // Create employee_transactions table
-    try {
-      db.exec(`
-        CREATE TABLE IF NOT EXISTS employee_transactions (
-          id INTEGER PRIMARY KEY AUTOINCREMENT,
-          employee_id INTEGER NOT NULL,
-          date TEXT NOT NULL,
-          type TEXT NOT NULL,
-          amount REAL NOT NULL,
-          item_name TEXT,
-          description TEXT,
-          FOREIGN KEY (employee_id) REFERENCES employees (id) ON DELETE CASCADE
-        );
-      `);
-    } catch(e) {}
-
-    // Create warehouses table
-    try {
-      db.exec(`
-        CREATE TABLE IF NOT EXISTS warehouses (
-          id INTEGER PRIMARY KEY AUTOINCREMENT,
-          name TEXT NOT NULL,
-          code TEXT UNIQUE,
-          address TEXT,
-          description TEXT
-        );
-      `);
-    } catch(e) {
-      console.error('Error creating warehouses table:', e);
-    }
-
-    // Default Seed Warehouse
-    try {
-      const preCheck = db.prepare("SELECT COUNT(*) as cnt FROM warehouses").get();
-      if (preCheck.cnt === 0) {
-        db.prepare("INSERT INTO warehouses (name, code, address, description) VALUES (?, ?, ?, ?)").run(
-          'انبار اصلی (مغازه/ویترین)',
-          'WH-01',
-          'محل شعبه مرکزی مغازه',
-          'انبار پیش‌فرض سیستم جهت انباشت و فروش کالاها'
-        );
-      }
-    } catch(e) {
-      console.error('Error seeding default warehouse:', e);
-    }
-
-    // Create warehouse_stocks table
-    try {
-      db.exec(`
-        CREATE TABLE IF NOT EXISTS warehouse_stocks (
-          id INTEGER PRIMARY KEY AUTOINCREMENT,
-          warehouse_id INTEGER NOT NULL,
-          product_id INTEGER NOT NULL,
-          quantity REAL DEFAULT 0,
-          FOREIGN KEY (warehouse_id) REFERENCES warehouses (id) ON DELETE CASCADE,
-          FOREIGN KEY (product_id) REFERENCES products (id) ON DELETE CASCADE,
-          UNIQUE(warehouse_id, product_id)
-        );
-      `);
-    } catch(e) {
-      console.error('Error creating warehouse_stocks table:', e);
-    }
-
-    // Safe product column extensions
-    try { db.prepare('ALTER TABLE products ADD COLUMN internal_sku TEXT').run(); } catch(e) {}
-    try { db.prepare('ALTER TABLE products ADD COLUMN serial_number TEXT').run(); } catch(e) {}
-    try { db.prepare('ALTER TABLE products ADD COLUMN brand_id INTEGER').run(); } catch(e) {}
-    try { db.prepare('ALTER TABLE products ADD COLUMN image_base64 TEXT').run(); } catch(e) {}
-    try { db.prepare("ALTER TABLE products ADD COLUMN type TEXT DEFAULT 'product'").run(); } catch(e) {}
-    try { db.prepare('ALTER TABLE products ADD COLUMN required_docs TEXT').run(); } catch(e) {}
-    try { db.prepare('ALTER TABLE products ADD COLUMN barcode TEXT').run(); } catch(e) {}
-    try { db.prepare('ALTER TABLE products ADD COLUMN min_stock REAL DEFAULT 0').run(); } catch(e) {}
-
-    // Safe inventory column extensions
-    try { db.prepare('ALTER TABLE inventory ADD COLUMN warehouse_id INTEGER').run(); } catch(e) {}
-    try { db.prepare('ALTER TABLE inventory ADD COLUMN to_warehouse_id INTEGER').run(); } catch(e) {}
-    try { db.prepare('ALTER TABLE inventory ADD COLUMN username TEXT').run(); } catch(e) {}
-    try { db.prepare('ALTER TABLE invoices ADD COLUMN username TEXT').run(); } catch(e) {}
-
-    // Create price_updates table for structural audits and rolls
-    try {
-      db.exec(`
-        CREATE TABLE IF NOT EXISTS price_updates (
-          id INTEGER PRIMARY KEY AUTOINCREMENT,
-          update_date TEXT NOT NULL,
-          username TEXT NOT NULL,
-          description TEXT,
-          rollback_status INTEGER DEFAULT 0
-        );
-      `);
-    } catch(e) {
-      console.error('Error creating price_updates table:', e);
-    }
-
-    try {
-      db.exec(`
-        CREATE TABLE IF NOT EXISTS price_update_items (
-          id INTEGER PRIMARY KEY AUTOINCREMENT,
-          price_update_id INTEGER NOT NULL,
-          product_id INTEGER NOT NULL,
-          old_price REAL,
-          new_price REAL,
-          old_cost REAL,
-          new_cost REAL,
-          FOREIGN KEY (price_update_id) REFERENCES price_updates (id) ON DELETE CASCADE,
-          FOREIGN KEY (product_id) REFERENCES products (id) ON DELETE CASCADE
-        );
-      `);
-    } catch(e) {
-      console.error('Error creating price_update_items table:', e);
-    }
-
-
-
-    try {
-      db.exec(`
-        CREATE TABLE IF NOT EXISTS person_financial_ledger (
-          id INTEGER PRIMARY KEY AUTOINCREMENT,
-          person_id INTEGER NOT NULL,
-          date TEXT NOT NULL,
-          type TEXT NOT NULL, -- 'received', 'paid', 'invoice_debit', 'adjustment'
-          amount REAL NOT NULL, -- positive for debit (customer owes us), negative for credit (we owe customer)
-          description TEXT,
-          created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
-          FOREIGN KEY (person_id) REFERENCES persons (id) ON DELETE CASCADE
-        );
-      `);
-    } catch(e) {
-      console.error('Error creating person_financial_ledger table:', e);
-    }
-
-    try {
-      db.exec(`
-        CREATE TABLE IF NOT EXISTS person_notes (
-          id INTEGER PRIMARY KEY AUTOINCREMENT,
-          person_id INTEGER NOT NULL,
-          description TEXT NOT NULL,
-          followup_date TEXT,
-          reminder TEXT,
-          created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
-          FOREIGN KEY (person_id) REFERENCES persons (id) ON DELETE CASCADE
-        );
-      `);
-    } catch(e) {
-      console.error('Error creating person_notes table:', e);
-    }
-
-    // Cash and Bank tables
-    try {
-      db.exec(`
-        CREATE TABLE IF NOT EXISTS cash_registers (
-          id INTEGER PRIMARY KEY AUTOINCREMENT,
-          name TEXT NOT NULL,
-          balance REAL DEFAULT 0,
-          is_default INTEGER DEFAULT 0
-        );
-      `);
-    } catch(e) {
-      console.error('Error creating cash_registers table:', e);
-    }
-
-    try {
-      db.exec(`
-        CREATE TABLE IF NOT EXISTS bank_accounts (
-          id INTEGER PRIMARY KEY AUTOINCREMENT,
-          bank_name TEXT NOT NULL,
-          account_number TEXT NOT NULL,
-          card_number TEXT,
-          balance REAL DEFAULT 0,
-          is_default INTEGER DEFAULT 0
-        );
-      `);
-    } catch(e) {
-      console.error('Error creating bank_accounts table:', e);
-    }
-
-    try {
-      db.exec(`
-        CREATE TABLE IF NOT EXISTS treasury_transactions (
-          id INTEGER PRIMARY KEY AUTOINCREMENT,
-          date TEXT NOT NULL,
-          source_type TEXT NOT NULL, -- 'cash' or 'bank'
-          source_id INTEGER NOT NULL,
-          type TEXT NOT NULL, -- 'deposit', 'withdrawal', 'transfer'
-          amount REAL NOT NULL,
-          destination_type TEXT, -- 'cash', 'bank', 'person', 'other'
-          destination_id INTEGER,
-          description TEXT,
-          created_at DATETIME DEFAULT CURRENT_TIMESTAMP
-        );
-      `);
-    } catch(e) {
-      console.error('Error creating treasury_transactions table:', e);
-    }
-
-
-
-    // Seed default cash registers & bank accounts
-    try {
-      const cashCheck = db.prepare("SELECT COUNT(*) as cnt FROM cash_registers").get();
-      if (cashCheck.cnt === 0) {
-        db.prepare("INSERT INTO cash_registers (name, balance, is_default) VALUES (?, ?, ?)").run('صندوق اصلی فروشگاه', 0, 1);
-        db.prepare("INSERT INTO cash_registers (name, balance, is_default) VALUES (?, ?, ?)").run('صندوق جانبی / کشو', 0, 0);
-      }
-    } catch(e) {
-      console.error('Error seeding default cash_registers:', e);
-    }
-
-    try {
-      const bankCheck = db.prepare("SELECT COUNT(*) as cnt FROM bank_accounts").get();
-      if (bankCheck.cnt === 0) {
-        db.prepare("INSERT INTO bank_accounts (bank_name, account_number, card_number, balance, is_default) VALUES (?, ?, ?, ?, ?)").run('بانک ملی', '0102030405006', '6037991122334455', 0, 1);
-        db.prepare("INSERT INTO bank_accounts (bank_name, account_number, card_number, balance, is_default) VALUES (?, ?, ?, ?, ?)").run('بانک ملت', '1234567890', '6104337788990011', 0, 0);
-      }
-    } catch(e) {
-      console.error('Error seeding default bank_accounts:', e);
-    }
-
-    try { db.prepare('ALTER TABLE persons ADD COLUMN business_name TEXT').run(); } catch(e) {}
-    try { db.prepare('ALTER TABLE persons ADD COLUMN brand TEXT').run(); } catch(e) {}
-    try { db.prepare('ALTER TABLE persons ADD COLUMN business_activity TEXT').run(); } catch(e) {}
-    try { db.prepare('ALTER TABLE persons ADD COLUMN business_address TEXT').run(); } catch(e) {}
-    try { db.prepare('ALTER TABLE persons ADD COLUMN whatsapp TEXT').run(); } catch(e) {}
-    try { db.prepare('ALTER TABLE persons ADD COLUMN province TEXT').run(); } catch(e) {}
-    try { db.prepare('ALTER TABLE persons ADD COLUMN region TEXT').run(); } catch(e) {}
-    try { db.prepare('ALTER TABLE persons ADD COLUMN last_purchase TEXT').run(); } catch(e) {}
-    try { db.prepare('ALTER TABLE persons ADD COLUMN last_payment TEXT').run(); } catch(e) {}
-    try { db.prepare('ALTER TABLE persons ADD COLUMN last_activity TEXT').run(); } catch(e) {}
-
-    try { db.prepare('ALTER TABLE products ADD COLUMN wholesale_price REAL DEFAULT 0').run(); } catch(e) {}
-    try { db.prepare('ALTER TABLE products ADD COLUMN min_selling_price REAL DEFAULT 0').run(); } catch(e) {}
-    try { db.prepare("ALTER TABLE products ADD COLUMN status TEXT DEFAULT 'فعال'").run(); } catch(e) {}
-
-    try { db.prepare('ALTER TABLE invoice_items ADD COLUMN discount_percent REAL DEFAULT 0').run(); } catch(e) {}
-    try { db.prepare('ALTER TABLE invoice_items ADD COLUMN discount_amount REAL DEFAULT 0').run(); } catch(e) {}
-
-    try { db.prepare('ALTER TABLE invoices ADD COLUMN payment_cash REAL DEFAULT 0').run(); } catch(e) {}
-    try { db.prepare('ALTER TABLE invoices ADD COLUMN payment_card REAL DEFAULT 0').run(); } catch(e) {}
-    try { db.prepare('ALTER TABLE invoices ADD COLUMN payment_bank REAL DEFAULT 0').run(); } catch(e) {}
-    try { db.prepare('ALTER TABLE invoices ADD COLUMN payment_cheque REAL DEFAULT 0').run(); } catch(e) {}
-    try { db.prepare('ALTER TABLE invoices ADD COLUMN payment_credit REAL DEFAULT 0').run(); } catch(e) {}
-    try { db.prepare('ALTER TABLE invoices ADD COLUMN payment_installment REAL DEFAULT 0').run(); } catch(e) {}
-
-    try { db.prepare('ALTER TABLE inventory ADD COLUMN balance_after REAL DEFAULT 0').run(); } catch(e) {}
-
-    console.log('Database initialized successfully with categories, brands and employees.');
-  } catch (error) {
-    console.error('Failed to initialize database:', error);
   }
 }
+
+// Ensure icon is written to disk at the very beginning of load (if not packaged)
+ensureIconExists();
+
+let mainWindow;
+let tray = null;
+let widgetWindow = null;
 
 function createWindow() {
-  const mainWindow = new BrowserWindow({
-    width: 1200,
+  ensureIconExists();
+  let iconPath = path.join(__dirname, '../assets/icon.png');
+  if (!fs.existsSync(iconPath)) {
+    iconPath = path.join(process.resourcesPath, 'assets/icon.png');
+  }
+  if (!fs.existsSync(iconPath)) {
+    iconPath = path.join(app.getAppPath(), 'assets/icon.png');
+  }
+
+  let windowIcon = undefined;
+  if (fs.existsSync(iconPath)) {
+    try {
+      windowIcon = nativeImage.createFromPath(iconPath);
+    } catch (e) {
+      console.error('Failed to load window icon via nativeImage:', e);
+    }
+  }
+
+  mainWindow = new BrowserWindow({
+    width: 1280,
     height: 800,
-    frame: false, // Frameless window for custom header
+    title: "مدیریت آرشیو فیلم و سریال",
+    frame: false,
+    icon: windowIcon,
     webPreferences: {
-      preload: path.join(__dirname, 'preload.cjs'),
       nodeIntegration: false,
       contextIsolation: true,
-    },
-  });
-
-  // Window Controls IPC
-  ipcMain.on('window-control', (event, command) => {
-    switch (command) {
-      case 'close':
-        mainWindow.close();
-        break;
-      case 'minimize':
-        mainWindow.minimize();
-        break;
-      case 'maximize':
-        if (mainWindow.isMaximized()) {
-          mainWindow.unmaximize();
-        } else {
-          mainWindow.maximize();
-        }
-        break;
+      preload: path.join(__dirname, 'preload.cjs'),
+      webSecurity: false
     }
   });
 
-  // Load the Vite dev server in development, or the local index.html in production
-  const isDev = process.env.NODE_ENV === 'development' || !app.isPackaged;
-  
+  // Hide the default menu bar
+  mainWindow.setMenuBarVisibility(false);
+
+  // In development, load the Vite dev server. In production, load the static build.
+  const isDev = process.env.NODE_ENV === 'development';
   if (isDev) {
     mainWindow.loadURL('http://localhost:3000');
-    mainWindow.webContents.openDevTools();
   } else {
     mainWindow.loadFile(path.join(__dirname, '../dist/index.html'));
   }
+
+  mainWindow.on('minimize', (event) => {
+    event.preventDefault();
+    mainWindow.hide();
+  });
+
+  mainWindow.on('close', (event) => {
+    if (!app.isQuiting) {
+      event.preventDefault();
+      mainWindow.hide();
+    }
+    return false;
+  });
+
+  mainWindow.on('closed', () => {
+    mainWindow = null;
+  });
 }
 
-app.whenReady().then(() => {
-  initializeDatabase();
-  createWindow();
-
-  app.on('activate', function () {
-    if (BrowserWindow.getAllWindows().length === 0) createWindow();
-  });
+// IPC Handlers for Native APIs
+ipcMain.handle('minimize-window', () => {
+  if (mainWindow) {
+    mainWindow.minimize();
+    return true;
+  }
+  return false;
 });
 
-app.on('window-all-closed', function () {
-  if (process.platform !== 'darwin') app.quit();
-});
-
-// ------------- IPC Handlers برای ارتباط React با SQLite -------------
-
-ipcMain.handle('getDbStats', () => {
-  if (!db) return null;
-  const getCount = (table) => {
-    try {
-      return db.prepare(`SELECT COUNT(*) as count FROM ${table}`).get().count;
-    } catch {
-      return 0;
+ipcMain.handle('maximize-window', () => {
+  if (mainWindow) {
+    if (mainWindow.isMaximized()) {
+      mainWindow.unmaximize();
+    } else {
+      mainWindow.maximize();
     }
-  };
-
-  return {
-    path: db.name,
-    products: getCount('products'),
-    customers: getCount('customers'),
-    invoices: getCount('invoices'),
-    inventory: getCount('inventory'),
-    persons: getCount('persons'),
-    lastUpdated: new Date().toISOString()
-  };
+    return true;
+  }
+  return false;
 });
 
-ipcMain.handle('getDashboardData', () => {
-  if (!db) return { success: false, error: 'Database not connected' };
-  try {
-    // 1. Active customers count
-    const customersCount = db.prepare(`
-      SELECT COUNT(DISTINCT id) as count FROM persons 
-      WHERE category = 'مشتری' OR id IN (SELECT DISTINCT customer_id FROM invoices)
-    `).get().count;
+ipcMain.handle('close-window', () => {
+  if (mainWindow) {
+    mainWindow.close();
+    return true;
+  }
+  return false;
+});
 
-    // 2. Products count
-    const productsCount = db.prepare(`
-      SELECT COUNT(*) as count FROM products WHERE type = 'product' OR type IS NULL
-    `).get().count;
-
-    // 3. Today's invoices
-    const todayInvoicesCount = db.prepare(`
-      SELECT COUNT(*) as count FROM invoices 
-      WHERE date(date, 'localtime') = date('now', 'localtime') OR date(date) = date('now')
-    `).get().count;
-
-    // 4. Today's sales
-    const todaySales = db.prepare(`
-      SELECT COALESCE(SUM(final_amount), 0) as total FROM invoices 
-      WHERE date(date, 'localtime') = date('now', 'localtime') OR date(date) = date('now')
-    `).get().total;
-
-    // 5. Today's profit
-    const todayProfit = db.prepare(`
-      SELECT COALESCE(SUM(ii.quantity * (ii.unit_price - COALESCE(p.cost, 0))), 0) as profit 
-      FROM invoice_items ii 
-      JOIN invoices i ON ii.invoice_id = i.id 
-      JOIN products p ON ii.product_id = p.id 
-      WHERE date(i.date, 'localtime') = date('now', 'localtime') OR date(i.date) = date('now')
-    `).get().profit;
-
-    // 6. Products stock query
-    const productsStock = db.prepare(`
-      SELECT p.id, p.name, p.code, p.unit, p.price, p.cost, p.image_base64, p.min_stock,
-        (SELECT COALESCE(SUM(quantity), 0) FROM warehouse_stocks WHERE product_id = p.id) as total_stock,
-        c.name as category_name
-      FROM products p
-      LEFT JOIN categories c ON p.category_id = c.id
-      WHERE p.type = 'product' OR p.type IS NULL
-    `).all();
-
-    const lowStockProducts = productsStock.filter(p => p.total_stock <= Math.max(1, p.min_stock || 5));
-    const lowStockCount = lowStockProducts.length;
-
-    // 7. Recent Invoices (limit 15)
-    const recentInvoices = db.prepare(`
-      SELECT i.*, 
-        COALESCE(p.nickname, p.first_name || ' ' || p.last_name, 'مشتری عمومی (فروش سریع)') as customer_name
-      FROM invoices i
-      LEFT JOIN persons p ON i.customer_id = p.id
-      ORDER BY i.id DESC
-      LIMIT 15
-    `).all();
-
-    // 8. Recent Financial Ledger Entries (limit 15)
-    const recentLedger = db.prepare(`
-      SELECT l.*, 
-        COALESCE(p.nickname, p.first_name || ' ' || p.last_name, 'شخص عمومی') as person_name
-      FROM person_financial_ledger l
-      JOIN persons p ON l.person_id = p.id
-      ORDER BY l.id DESC
-      LIMIT 15
-    `).all();
-
-    // 9. Unpaid Invoices
-    const unpaidInvoices = db.prepare(`
-      SELECT i.*, 
-        COALESCE(p.nickname, p.first_name || ' ' || p.last_name, 'مشتری عمومی') as customer_name
-      FROM invoices i
-      LEFT JOIN persons p ON i.customer_id = p.id
-      WHERE i.status != 'پرداخت شده'
-      ORDER BY i.id DESC
-      LIMIT 15
-    `).all();
-
-    // 10. Customer Debts, Total Debtors and Creditors
-    const persons = db.prepare(`
-      SELECT id, first_name, last_name, nickname, type, category
-      FROM persons
-    `).all();
+function getUncPath(filepath, peerIp) {
+  if (!filepath || !peerIp) return null;
+  let cleanPath = filepath.replace(/\//g, '\\');
+  const driveMatch = cleanPath.match(/^([a-zA-Z]):\\(.*)$/);
+  if (driveMatch) {
+    const driveLetter = driveMatch[1];
+    const relativePart = driveMatch[2];
     
-    const customerDebts = [];
-    let totalDebtorsSum = 0;
-    let totalCreditorsSum = 0;
-
-    for (const p of persons) {
-      const invoiceDebts = db.prepare(`
-        SELECT SUM(CASE WHEN type = 'خرید' THEN -final_amount ELSE final_amount END) as total FROM invoices 
-        WHERE customer_id = ? AND status != 'پرداخت شده'
-      `).get(p.id).total || 0;
-
-      const manualBalance = db.prepare(`
-        SELECT SUM(amount) as total FROM person_financial_ledger 
-        WHERE person_id = ?
-      `).get(p.id).total || 0;
-
-      const netBalance = invoiceDebts + manualBalance;
-      if (netBalance > 0) {
-        totalDebtorsSum += netBalance;
-        customerDebts.push({
-          id: p.id,
-          name: p.nickname || `${p.first_name || ''} ${p.last_name || ''}`.trim() || 'شخص بدون نام',
-          debt: netBalance
-        });
-      } else if (netBalance < 0) {
-        totalCreditorsSum += Math.abs(netBalance);
+    // Possibility A: Shared drive (e.g. \\192.168.100.4\D\Media\Movies\...)
+    const pathA = `\\\\${peerIp}\\${driveLetter}\\${relativePart}`;
+    
+    // Possibility B: direct shared folders (e.g. Movies, Series, Media)
+    let pathB = null;
+    if (relativePart.toLowerCase().startsWith('media\\movies\\')) {
+      const sub = relativePart.substring('media\\movies\\'.length);
+      pathB = `\\\\${peerIp}\\Movies\\${sub}`;
+    } else if (relativePart.toLowerCase().startsWith('media\\series\\')) {
+      const sub = relativePart.substring('media\\series\\'.length);
+      pathB = `\\\\${peerIp}\\Series\\${sub}`;
+    } else if (relativePart.toLowerCase().startsWith('movies\\')) {
+      const sub = relativePart.substring('movies\\'.length);
+      pathB = `\\\\${peerIp}\\Movies\\${sub}`;
+    } else if (relativePart.toLowerCase().startsWith('series\\')) {
+      const sub = relativePart.substring('series\\'.length);
+      pathB = `\\\\${peerIp}\\Series\\${sub}`;
+    } else {
+      const parts = relativePart.split('\\');
+      if (parts.length > 0) {
+        pathB = `\\\\${peerIp}\\${parts[0]}\\${parts.slice(1).join('\\')}`;
       }
     }
-    customerDebts.sort((a, b) => b.debt - a.debt);
+    
+    // Possibility C: Administrative share (e.g. \\192.168.100.4\D$\Media\Movies\...)
+    const pathC = `\\\\${peerIp}\\${driveLetter}$\\${relativePart}`;
+    
+    return { pathA, pathB, pathC };
+  }
+  return null;
+}
 
-    // 11. Fetch Best-Selling Products
-    const bestSellers = db.prepare(`
-      SELECT p.id, p.name, p.price, p.cost, p.unit, p.image_base64, 
-        COALESCE(SUM(ii.quantity), 0) as total_sold, 
-        c.name as category_name
-      FROM invoice_items ii
-      JOIN invoices i ON ii.invoice_id = i.id
-      JOIN products p ON ii.product_id = p.id
-      LEFT JOIN categories c ON p.category_id = c.id
-      WHERE i.type = 'فروش' OR i.type IS NULL
-      GROUP BY p.id
-      ORDER BY total_sold DESC
-      LIMIT 12
-    `).all();
-
-    // 12. Category Sales Distribution
-    const categorySales = db.prepare(`
-      SELECT COALESCE(c.name, 'بدون دسته‌بندی') as name, SUM(ii.total) as value
-      FROM invoice_items ii
-      JOIN invoices i ON ii.invoice_id = i.id
-      JOIN products p ON ii.product_id = p.id
-      LEFT JOIN categories c ON p.category_id = c.id
-      WHERE i.type = 'فروش' OR i.type IS NULL
-      GROUP BY p.category_id
-      ORDER BY value DESC
-    `).all();
-
-    // 13. All invoices for multi-period sales calculation on client-side
-    const allInvoicesForCalculations = db.prepare(`
-      SELECT i.id, i.invoice_number, i.date, i.total_amount, i.discount, i.tax, i.final_amount, i.status, i.type,
-        (SELECT COALESCE(SUM(ii.quantity * (ii.unit_price - COALESCE(p.cost, 0))), 0) 
-         FROM invoice_items ii 
-         JOIN products p ON ii.product_id = p.id 
-         WHERE ii.invoice_id = i.id) as profit
-      FROM invoices i
-      ORDER BY i.date ASC
-    `).all();
-
-    return {
-      success: true,
-      customersCount,
-      productsCount,
-      todayInvoicesCount,
-      todaySales,
-      todayProfit,
-      lowStockCount,
-      lowStockProducts,
-      recentInvoices,
-      recentLedger,
-      unpaidInvoices,
-      customerDebts,
-      totalDebtorsSum,
-      totalCreditorsSum,
-      bestSellers,
-      categorySales,
-      allInvoicesForCalculations,
-      allProducts: productsStock
-    };
-  } catch (e) {
-    console.error('Error fetching dashboard data:', e);
-    return { success: false, error: e.message };
+ipcMain.handle('open-file-in-explorer', async (event, filepath, originPeerIp) => {
+  try {
+    if (!filepath) return { success: false, error: 'No filepath provided' };
+    
+    if (originPeerIp && originPeerIp.trim()) {
+      const peerIp = originPeerIp.trim();
+      const unc = getUncPath(filepath, peerIp);
+      if (unc) {
+        const pathsToTry = [];
+        if (unc.pathB) pathsToTry.push(unc.pathB);
+        pathsToTry.push(unc.pathA);
+        pathsToTry.push(unc.pathC);
+        
+        for (const uncPath of pathsToTry) {
+          if (fs.existsSync(uncPath)) {
+            shell.showItemInFolder(uncPath);
+            return { success: true, resolvedPath: uncPath };
+          }
+        }
+        
+        // Fallback: spawn explorer.exe directly to select/highlight the file.
+        // This will bring up Windows credentials prompt if necessary!
+        const { exec } = require('child_process');
+        for (const uncPath of pathsToTry) {
+          try {
+            exec(`explorer.exe /select,"${uncPath}"`);
+          } catch (e) {}
+        }
+        return { success: true, resolvedPath: pathsToTry[0] };
+      }
+      return { success: false, error: 'آدرس شبکه در دسترس نیست.' };
+    }
+    
+    shell.showItemInFolder(filepath);
+    return { success: true };
+  } catch (err) {
+    return { success: false, error: err.message };
   }
 });
 
-const { dialog } = require('electron');
+ipcMain.handle('play-video-file', async (event, filepath, originPeerIp) => {
+  try {
+    if (!filepath) return { success: false, error: 'No filepath provided' };
+    
+    if (originPeerIp && originPeerIp.trim()) {
+      const peerIp = originPeerIp.trim();
+      const unc = getUncPath(filepath, peerIp);
+      if (unc) {
+        const pathsToTry = [];
+        if (unc.pathB) pathsToTry.push(unc.pathB);
+        pathsToTry.push(unc.pathA);
+        pathsToTry.push(unc.pathC);
+        
+        for (const uncPath of pathsToTry) {
+          if (fs.existsSync(uncPath)) {
+            const err = await shell.openPath(uncPath);
+            if (!err) return { success: true, resolvedPath: uncPath };
+          }
+        }
+        
+        // Direct shell trigger: spawn 'start' process to play video file.
+        // This forces Windows default player launch and pops credentials if needed.
+        const { exec } = require('child_process');
+        for (const uncPath of pathsToTry) {
+          try {
+            exec(`start "" "${uncPath}"`);
+          } catch (e) {}
+        }
+        return { success: true, resolvedPath: pathsToTry[0] };
+      }
+      
+      // Secondary fallback: Stream over simple HTTP server running on peer port 3300
+      const downloadUrl = `http://${peerIp}:3300/api/lan/download?path=${encodeURIComponent(filepath)}`;
+      const err = await shell.openExternal(downloadUrl);
+      if (err) throw err;
+      return { success: true, streamUrl: downloadUrl };
+    }
+    
+    const err = await shell.openPath(filepath);
+    if (err) {
+      return { success: false, error: err };
+    }
+    return { success: true };
+  } catch (err) {
+    return { success: false, error: err.message };
+  }
+});
 
-ipcMain.handle('changeDbPath', async (event) => {
-  const { canceled, filePaths } = await dialog.showOpenDialog({
+ipcMain.handle('open-folder-directory', async (event, dirpath, originPeerIp) => {
+  try {
+    if (!dirpath) return { success: false, error: 'No path provided' };
+    
+    if (originPeerIp && originPeerIp.trim()) {
+      const peerIp = originPeerIp.trim();
+      const unc = getUncPath(dirpath, peerIp);
+      if (unc) {
+        const pathsToTry = [];
+        if (unc.pathB) pathsToTry.push(unc.pathB);
+        pathsToTry.push(unc.pathA);
+        pathsToTry.push(unc.pathC);
+        
+        for (const uncPath of pathsToTry) {
+          if (fs.existsSync(uncPath)) {
+            const err = await shell.openPath(uncPath);
+            if (!err) return { success: true, resolvedPath: uncPath };
+          }
+        }
+        
+        // Direct shell open: spawn explorer.exe directory directly.
+        // This prompts standard network folder credentials window!
+        const { exec } = require('child_process');
+        for (const uncPath of pathsToTry) {
+          try {
+            exec(`explorer.exe "${uncPath}"`);
+          } catch (e) {}
+        }
+        return { success: true, resolvedPath: pathsToTry[0] };
+      }
+      return { success: false, error: 'پوشه به اشتراک گذاشته شبکه یافت نشد. اطمینان حاصل کنید اشتراک‌گذاری در سیستم همکار برقرار است.' };
+    }
+    
+    const err = await shell.openPath(dirpath);
+    if (err) {
+      return { success: false, error: err };
+    }
+    return { success: true };
+  } catch (err) {
+    return { success: false, error: err.message };
+  }
+});
+
+ipcMain.handle('select-file', async (event, filters) => {
+  if (!mainWindow) return null;
+  const result = await dialog.showOpenDialog(mainWindow, {
+    properties: ['openFile'],
+    filters: filters || [
+      { name: 'Media Files', extensions: ['mp4', 'mkv', 'avi', 'm4v', 'mov', 'mp3', 'wav', 'flac'] },
+      { name: 'All Files', extensions: ['*'] }
+    ]
+  });
+  return result.canceled ? null : result.filePaths[0];
+});
+
+ipcMain.handle('select-poster', async () => {
+  if (!mainWindow) return null;
+  const result = await dialog.showOpenDialog(mainWindow, {
+    properties: ['openFile'],
+    filters: [
+      { name: 'Image Files', extensions: ['jpg', 'jpeg', 'png', 'webp', 'gif', 'bmp', 'tiff', 'tif', 'jfif', 'svg', 'ico', 'avif', 'heic', 'heif', 'pjpeg', 'pjpg', 'JPG', 'JPEG', 'PNG', 'WEBP', 'GIF', 'BMP', 'TIFF', 'TIF', 'JFIF', 'SVG', 'ICO', 'AVIF', 'HEIC', 'HEIF', 'PJPEG', 'PJPG'] },
+      { name: 'All Files', extensions: ['*'] }
+    ]
+  });
+  return result.canceled ? null : result.filePaths[0];
+});
+
+ipcMain.handle('select-directory', async () => {
+  if (!mainWindow) return null;
+  const result = await dialog.showOpenDialog(mainWindow, {
     properties: ['openDirectory']
   });
-  
-  if (canceled || filePaths.length === 0) {
-    return { success: false };
+  return result.canceled ? null : result.filePaths[0];
+});
+
+// Path to physical database file on hard disk
+const getDbPath = () => {
+  const docPath = app.getPath('documents');
+  const dir = path.join(docPath, 'MediaCenter');
+  if (!fs.existsSync(dir)) {
+    fs.mkdirSync(dir, { recursive: true });
   }
-  
-  const newDir = filePaths[0];
-  const newDbPath = path.join(newDir, 'database.sqlite');
-  
+  return path.join(dir, 'database_media_center.db');
+};
+
+const getDbConfigPath = () => {
+  const docPath = app.getPath('documents');
+  const dir = path.join(docPath, 'MediaCenter');
+  if (!fs.existsSync(dir)) {
+    fs.mkdirSync(dir, { recursive: true });
+  }
+  return path.join(dir, 'sqlite_config.json');
+};
+
+const getSqliteDbPath = () => {
   try {
-    saveConfig({ dbPath: newDbPath });
-    const Database = require('better-sqlite3');
-    if (db) {
-      db.close();
-    }
-    db = new Database(newDbPath);
-    // You'd ideally run your CREATE TABLE script here again as well
-    initializeDatabase(); // Re-runs tables creation nicely
-    return { success: true, path: newDbPath };
-  } catch (error) {
-    console.error('Error changing DB path', error);
-    return { success: false, error: error.message };
-  }
-});
-
-// Settings Handlers
-ipcMain.handle('getConfig', () => {
-  return loadConfig();
-});
-
-ipcMain.handle('saveConfig', (event, configData) => {
-  return saveConfig(configData);
-});
-
-// Persons Handlers
-ipcMain.handle('addPerson', (event, personData) => {
-  if (!db) throw new Error("دیتابیس متصل نیست");
-  
-  try {
-    db.prepare('BEGIN').run();
-    const config = loadConfig();
-    let { accounting_code } = personData;
-
-    // Use current number from DB to generate an auto code if not provided
-    if (!accounting_code && personData.auto_accounting_code) {
-      const countRes = db.prepare('SELECT count(*) as count FROM persons').get();
-      const nextNum = parseInt(config.accCodeStart || 1000) + countRes.count;
-      accounting_code = `${nextNum}${config.accCodeSuffix || '-ACC'}`;
-    }
-
-    const roles = personData.roles || [];
-
-    const stmt = db.prepare(`
-      INSERT INTO persons (
-        accounting_code, first_name, last_name, title, nickname, type, category, 
-        national_id, economic_code, registration_number, personal_code, credit_limit, 
-        tax_registered, address, country, city, postal_code, phone1, phone2, phone3, 
-        fax, email, website, bank_account, bank_card, bank_name, iban, birth_date, 
-        membership_date, marriage_date, description, avatar,
-        business_name, brand, business_activity, business_address,
-        whatsapp, province, region, last_purchase, last_payment, last_activity
-      ) VALUES (
-        @accounting_code, @first_name, @last_name, @title, @nickname, @type, @category,
-        @national_id, @economic_code, @registration_number, @personal_code, @credit_limit,
-        @tax_registered, @address, @country, @city, @postal_code, @phone1, @phone2, @phone3,
-        @fax, @email, @website, @bank_account, @bank_card, @bank_name, @iban, @birth_date,
-        @membership_date, @marriage_date, @description, @avatar,
-        @business_name, @brand, @business_activity, @business_address,
-        @whatsapp, @province, @region, @last_purchase, @last_payment, @last_activity
-      )
-    `);
-
-    const defaultParams = {
-      accounting_code: '',
-      first_name: '',
-      last_name: '',
-      title: '',
-      nickname: '',
-      type: 'حقیقی',
-      category: '',
-      national_id: '',
-      economic_code: '',
-      registration_number: '',
-      personal_code: '',
-      credit_limit: 0,
-      tax_registered: 0,
-      address: '',
-      country: '',
-      city: '',
-      postal_code: '',
-      phone1: '',
-      phone2: '',
-      phone3: '',
-      fax: '',
-      email: '',
-      website: '',
-      bank_account: '',
-      bank_card: '',
-      bank_name: '',
-      iban: '',
-      birth_date: '',
-      membership_date: '',
-      marriage_date: '',
-      description: '',
-      avatar: '',
-      business_name: '',
-      brand: '',
-      business_activity: '',
-      business_address: '',
-      whatsapp: '',
-      province: '',
-      region: '',
-      last_purchase: '',
-      last_payment: '',
-      last_activity: ''
-    };
-
-    const runParams = {
-      ...defaultParams,
-      ...personData,
-      accounting_code,
-      tax_registered: personData.tax_registered ? 1 : 0,
-      credit_limit: personData.credit_limit || 0,
-      avatar: personData.avatar || ''
-    };
-
-    const info = stmt.run(runParams);
-    
-    const personId = info.lastInsertRowid;
-    const nameStr = personData.title || (personData.first_name + ' ' + personData.last_name);
-
-    if (roles.includes('سهامدار')) {
-      db.prepare('INSERT INTO shareholders (name, person_id, share_percent, join_date) VALUES (?, ?, ?, ?)').run(
-         nameStr, personId, 0, personData.membership_date || null
-       );
-    }
-    if (roles.includes('کارمند')) {
-      db.prepare('INSERT INTO employees (name, person_id, position, salary, hire_date) VALUES (?, ?, ?, ?, ?)').run(
-         nameStr, personId, '', 0, personData.membership_date || null
-       );
-    }
-    if (roles.includes('فروشنده')) {
-      db.prepare('INSERT INTO sellers (name, person_id, commission_percent, return_commission_percent) VALUES (?, ?, ?, ?)').run(
-         nameStr, personId, 0, 0
-       );
-    }
-
-    // Write audit log
-    const actor = personData.current_username || 'سیستم';
-    db.prepare(`
-      INSERT INTO audit_logs (username, action, target, details, date)
-      VALUES (?, ?, ?, ?, ?)
-    `).run(actor, 'ایجاد شخص', `شخص: ${nameStr}`, `ایجاد شخص جدید با کد حساب ${accounting_code}`, new Date().toISOString());
-
-    db.prepare('COMMIT').run();
-    return { success: true, id: personId, accounting_code };
-  } catch(e) {
-    if(db.inTransaction) db.prepare('ROLLBACK').run();
-    console.error('Error inserting person:', e);
-    throw e;
-  }
-});
-
-ipcMain.handle('getPersons', () => {
-  if (!db) return [];
-  try {
-    const stmt = db.prepare(`
-      SELECT p.*,
-        (SELECT COUNT(*) FROM employees e WHERE e.person_id = p.id) as is_employee,
-        (SELECT COUNT(*) FROM shareholders s WHERE s.person_id = p.id) as is_shareholder,
-        (SELECT COUNT(*) FROM sellers sl WHERE sl.person_id = p.id) as is_seller
-      FROM persons p
-      ORDER BY p.id DESC
-      LIMIT 200
-    `);
-    return stmt.all();
-  } catch(e) {
-    console.error('Error fetching persons with roles:', e);
-    // fallback if columns don't exist yet
-    const stmt = db.prepare('SELECT * FROM persons ORDER BY id DESC LIMIT 200');
-    return stmt.all();
-  }
-});
-
-ipcMain.handle('updatePerson', (event, personData) => {
-  if (!db) throw new Error("دیتابیس متصل نیست");
-  try {
-    db.prepare('BEGIN').run();
-    const stmt = db.prepare(`
-      UPDATE persons SET
-        first_name = @first_name,
-        last_name = @last_name,
-        title = @title,
-        nickname = @nickname,
-        type = @type,
-        category = @category,
-        national_id = @national_id,
-        economic_code = @economic_code,
-        registration_number = @registration_number,
-        personal_code = @personal_code,
-        credit_limit = @credit_limit,
-        tax_registered = @tax_registered,
-        address = @address,
-        country = @country,
-        city = @city,
-        postal_code = @postal_code,
-        phone1 = @phone1,
-        phone2 = @phone2,
-        phone3 = @phone3,
-        fax = @fax,
-        email = @email,
-        website = @website,
-        bank_account = @bank_account,
-        bank_card = @bank_card,
-        bank_name = @bank_name,
-        iban = @iban,
-        birth_date = @birth_date,
-        membership_date = @membership_date,
-        marriage_date = @marriage_date,
-        description = @description,
-        avatar = @avatar,
-        business_name = @business_name,
-        brand = @brand,
-        business_activity = @business_activity,
-        business_address = @business_address,
-        whatsapp = @whatsapp,
-        province = @province,
-        region = @region,
-        last_purchase = @last_purchase,
-        last_payment = @last_payment,
-        last_activity = @last_activity,
-        updated_at = CURRENT_TIMESTAMP
-      WHERE id = @id
-    `);
-    
-    stmt.run({
-      whatsapp: '',
-      province: '',
-      region: '',
-      last_purchase: '',
-      last_payment: '',
-      last_activity: '',
-      brand: '',
-      ...personData,
-      tax_registered: personData.tax_registered ? 1 : 0,
-      credit_limit: personData.credit_limit || 0,
-      avatar: personData.avatar || '',
-      business_name: personData.business_name || '',
-      business_activity: personData.business_activity || '',
-      business_address: personData.business_address || ''
-    });
-
-    const roles = personData.roles || [];
-    const nameStr = personData.title || ((personData.first_name || '') + ' ' + (personData.last_name || '')).trim();
-
-    // Sync Shareholders child table
-    const shExist = db.prepare('SELECT id FROM shareholders WHERE person_id = ?').get(personData.id);
-    if (roles.includes('سهامدار')) {
-      if (!shExist) {
-        db.prepare('INSERT INTO shareholders (name, person_id, share_percent, join_date) VALUES (?, ?, ?, ?)').run(
-           nameStr, personData.id, 0, personData.membership_date || null
-        );
-      } else {
-        db.prepare('UPDATE shareholders SET name = ? WHERE person_id = ?').run(nameStr, personData.id);
-      }
-    } else {
-      if (shExist) {
-        db.prepare('DELETE FROM shareholders WHERE person_id = ?').run(personData.id);
-      }
-    }
-
-    // Sync Employees child table
-    const empExist = db.prepare('SELECT id FROM employees WHERE person_id = ?').get(personData.id);
-    if (roles.includes('کارمند')) {
-      if (!empExist) {
-        db.prepare('INSERT INTO employees (name, person_id, position, salary, hire_date) VALUES (?, ?, ?, ?, ?)').run(
-           nameStr, personData.id, '', 0, personData.membership_date || null
-        );
-      } else {
-        db.prepare('UPDATE employees SET name = ? WHERE person_id = ?').run(nameStr, personData.id);
-      }
-    } else {
-      if (empExist) {
-        db.prepare('DELETE FROM employees WHERE person_id = ?').run(personData.id);
-      }
-    }
-
-    // Sync Sellers child table
-    const sellerExist = db.prepare('SELECT id FROM sellers WHERE person_id = ?').get(personData.id);
-    if (roles.includes('فروشنده')) {
-      if (!sellerExist) {
-        db.prepare('INSERT INTO sellers (name, person_id, commission_percent, return_commission_percent) VALUES (?, ?, ?, ?)').run(
-           nameStr, personData.id, 0, 0
-        );
-      } else {
-        db.prepare('UPDATE sellers SET name = ? WHERE person_id = ?').run(nameStr, personData.id);
-      }
-    } else {
-      if (sellerExist) {
-        db.prepare('DELETE FROM sellers WHERE person_id = ?').run(personData.id);
-      }
-    }
-
-    // Write audit log
-    const actor = personData.current_username || 'سیستم';
-    db.prepare(`
-      INSERT INTO audit_logs (username, action, target, details, date)
-      VALUES (?, ?, ?, ?, ?)
-    `).run(actor, 'ویرایش شخص', `شخص: ${nameStr}`, `ویرایش اطلاعات شخص با شناسه ${personData.id}`, new Date().toISOString());
-
-    db.prepare('COMMIT').run();
-    return { success: true };
-  } catch(e) {
-    if (db.inTransaction) db.prepare('ROLLBACK').run();
-    console.error('Error updating person:', e);
-    throw e;
-  }
-});
-
-ipcMain.handle('deletePerson', (event, personId) => {
-  if (!db) throw new Error("دیتابیس متصل نیست");
-  try {
-    const person = db.prepare('SELECT title, first_name, last_name, accounting_code FROM persons WHERE id = ?').get(personId);
-    const nameStr = person ? (person.title || ((person.first_name || '') + ' ' + (person.last_name || '')).trim()) : `شناسه ${personId}`;
-    const codeStr = person ? person.accounting_code : '';
-
-    db.prepare('DELETE FROM persons WHERE id = ?').run(personId);
-    db.prepare('DELETE FROM shareholders WHERE person_id = ?').run(personId);
-    db.prepare('DELETE FROM employees WHERE person_id = ?').run(personId);
-    db.prepare('DELETE FROM sellers WHERE person_id = ?').run(personId);
-
-    // Write audit log
-    const actor = 'سیستم';
-    db.prepare(`
-      INSERT INTO audit_logs (username, action, target, details, date)
-      VALUES (?, ?, ?, ?, ?)
-    `).run(actor, 'حذف شخص', `شخص: ${nameStr}`, `حذف شخص از سیستم (کد حساب: ${codeStr})`, new Date().toISOString());
-
-    return { success: true };
-  } catch(e) {
-    console.error('Error deleting person:', e);
-    throw e;
-  }
-});
-
-// GORGEOUS SHAREHOLDER DATA HANDLERS
-ipcMain.handle('getShareholders', () => {
-  if (!db) return [];
-  try {
-    return db.prepare(`
-      SELECT s.*, p.avatar, p.national_id, p.phone1, p.accounting_code, p.email
-      FROM shareholders s
-      LEFT JOIN persons p ON s.person_id = p.id
-      ORDER BY s.share_percent DESC, s.id DESC
-    `).all();
-  } catch(e) {
-    console.error('Error fetching shareholders:', e);
-    return [];
-  }
-});
-
-ipcMain.handle('updateShareholder', (event, data) => {
-  if (!db) throw new Error("دیتابیس متصل نیست");
-  try {
-    db.prepare(`
-      UPDATE shareholders SET
-        share_percent = @share_percent,
-        capital_contribution = @capital_contribution,
-        shares_count = @shares_count,
-        share_type = @share_type,
-        voting_rights = @voting_rights,
-        join_date = @join_date,
-        allocated_profit = @allocated_profit,
-        name = @name
-      WHERE id = @id
-    `).run(data);
-    return { success: true };
-  } catch (e) {
-    console.error('Error updating shareholder:', e);
-    throw e;
-  }
-});
-
-ipcMain.handle('addShareholderDirect', (event, data) => {
-  if (!db) throw new Error("دیتابیس متصل نیست");
-  try {
-    let name = data.name || '';
-    if (data.person_id) {
-      const person = db.prepare('SELECT first_name, last_name, title, type FROM persons WHERE id = ?').get(data.person_id);
-      if (person) {
-        name = person.type === 'حقوقی' ? person.title : `${person.first_name || ''} ${person.last_name || ''}`.trim();
-      }
-    }
-    const stmt = db.prepare(`
-      INSERT INTO shareholders (
-        name, person_id, share_percent, capital_contribution, shares_count, share_type, voting_rights, join_date, allocated_profit
-      ) VALUES (
-        ?, ?, ?, ?, ?, ?, ?, ?, ?
-      )
-    `);
-    stmt.run(
-      name,
-      data.person_id || null,
-      data.share_percent || 0,
-      data.capital_contribution || 0,
-      data.shares_count || 0,
-      data.share_type || 'عادی',
-      data.voting_rights !== undefined ? data.voting_rights : 1,
-      data.join_date || null,
-      data.allocated_profit || 0
-    );
-    return { success: true };
-  } catch (e) {
-    console.error('Error adding shareholder:', e);
-    throw e;
-  }
-});
-
-ipcMain.handle('deleteShareholder', (event, id) => {
-  if (!db) throw new Error("دیتابیس متصل نیست");
-  try {
-    db.prepare('DELETE FROM shareholders WHERE id = ?').run(id);
-    return { success: true };
-  } catch (e) {
-    console.error('Error deleting shareholder:', e);
-    throw e;
-  }
-});
-
-ipcMain.handle('getShareholdersStatistics', () => {
-  if (!db) return { totalSales: 0, totalProfit: 0, totalExpenses: 0, netIncome: 0 };
-  try {
-    const salesRes = db.prepare(`SELECT SUM(final_amount) as totalSales FROM invoices WHERE status = 'پرداخت شده'`).get();
-    const totalSales = salesRes ? (salesRes.totalSales || 0) : 0;
-
-    let totalProfit = totalSales * 0.25; 
-    try {
-      const marginRes = db.prepare(`
-        SELECT SUM(ii.quantity * (ii.unit_price - IFNULL(p.cost, 0))) as computedProfit
-        FROM invoice_items ii
-        JOIN invoices i ON ii.invoice_id = i.id
-        LEFT JOIN products p ON ii.product_id = p.id
-        WHERE i.status = 'پرداخت شده'
-      `).get();
-      if (marginRes && marginRes.computedProfit) {
-        totalProfit = marginRes.computedProfit;
-      }
-    } catch(e) {
-      console.warn('Could not compute exact profits via joins fallback to 25%', e);
-    }
-
-    const totalExpenses = totalProfit * 0.15; 
-    const netIncome = totalProfit - totalExpenses;
-
-    return {
-      totalSales,
-      totalProfit,
-      totalExpenses,
-      netIncome
-    };
-  } catch (e) {
-    console.error('Error calculating store statistics:', e);
-    return { totalSales: 1500000000, totalProfit: 375000000, totalExpenses: 120000000, netIncome: 255000000 };
-  }
-});
-
-// Test items legacy
-ipcMain.handle('addItem', (event, name) => {
-  if (!db) {
-    throw new Error("دیتابیس در دسترس نیست. ممکن است better-sqlite3 نصب نشده باشد.");
-  }
-  const stmt = db.prepare('INSERT INTO test_items (name) VALUES (?)');
-  const info = stmt.run(name);
-  return info.lastInsertRowid;
-});
-
-ipcMain.handle('getItems', () => {
-  if (!db) return [];
-  const stmt = db.prepare('SELECT * FROM test_items ORDER BY created_at DESC');
-  return stmt.all();
-});
-
-// SELLERS HANDLERS
-ipcMain.handle('getSellers', () => {
-  if (!db) return [];
-  try {
-    return db.prepare(`
-      SELECT s.*, p.avatar, p.national_id, p.phone1, p.accounting_code, p.email
-      FROM sellers s
-      LEFT JOIN persons p ON s.person_id = p.id
-      ORDER BY s.id DESC
-    `).all();
-  } catch (e) {
-    console.error('Error fetching sellers:', e);
-    return [];
-  }
-});
-
-ipcMain.handle('updateSeller', (event, data) => {
-  if (!db) throw new Error("دیتابیس متصل نیست");
-  try {
-    db.prepare(`
-      UPDATE sellers SET
-        name = ?,
-        commission_percent = ?,
-        return_commission_percent = ?,
-        description = ?
-      WHERE id = ?
-    `).run(
-      data.name,
-      parseFloat(data.commission_percent || 0),
-      parseFloat(data.return_commission_percent || 0),
-      data.description || '',
-      parseInt(data.id)
-    );
-    return { success: true };
-  } catch (e) {
-    console.error('Error updating seller:', e);
-    throw e;
-  }
-});
-
-ipcMain.handle('addSellerDirect', (event, data) => {
-  if (!db) throw new Error("دیتابیس متصل نیست");
-  try {
-    let name = data.name || '';
-    if (data.person_id) {
-      const person = db.prepare('SELECT first_name, last_name, title FROM persons WHERE id = ?').get(data.person_id);
-      if (person) {
-        name = person.title || `${person.first_name || ''} ${person.last_name || ''}`.trim();
-      }
-    }
-    const stmt = db.prepare(`
-      INSERT INTO sellers (name, person_id, commission_percent, return_commission_percent, description)
-      VALUES (?, ?, ?, ?, ?)
-    `);
-    const info = stmt.run(
-      name, 
-      data.person_id || null, 
-      parseFloat(data.commission_percent || 0), 
-      parseFloat(data.return_commission_percent || 0), 
-      data.description || ''
-    );
-    return { success: true, id: info.lastInsertRowid };
-  } catch (e) {
-    console.error('Error adding seller:', e);
-    throw e;
-  }
-});
-
-ipcMain.handle('deleteSeller', (event, id) => {
-  if (!db) throw new Error("دیتابیس متصل نیست");
-  try {
-    db.prepare('DELETE FROM sellers WHERE id = ?').run(id);
-    return { success: true };
-  } catch (e) {
-    console.error('Error deleting seller:', e);
-    throw e;
-  }
-});
-
-// ONBOARDING & SETUP HANDLERS
-ipcMain.handle('checkOnboardingStatus', () => {
-  if (!db) return { onboardingRequired: true, storeInfo: null };
-  try {
-    const usersCount = db.prepare('SELECT count(*) as count FROM users').get().count;
-    const store = db.prepare('SELECT * FROM store_info WHERE id = 1').get() || null;
-    return { onboardingRequired: usersCount === 0, storeInfo: store };
-  } catch (e) {
-    console.error('Error checking onboarding status:', e);
-    return { onboardingRequired: true, storeInfo: null };
-  }
-});
-
-ipcMain.handle('performOnboarding', (event, data) => {
-  if (!db) throw new Error("دیتابیس متصل نیست");
-  try {
-    db.prepare('BEGIN').run();
-    // 1. Save store info
-    db.prepare('INSERT OR REPLACE INTO store_info (id, name, address, phone, logo, description) VALUES (1, ?, ?, ?, ?, ?)')
-      .run(data.storeName || '', data.storeAddress || '', data.storePhone || '', data.storeLogo || '', data.storeDescription || '');
-
-    // 2. Clear any existing user schemas and add primary admin user
-    db.prepare('DELETE FROM users').run();
-    db.prepare(`
-      INSERT INTO users (username, password, role, permissions, recovery_question, recovery_answer)
-      VALUES (?, ?, 'مدیر ارشد', '*', ?, ?)
-    `).run(data.username, data.password, data.recoveryQuestion || '', data.recoveryAnswer || '');
-
-    // 3. Log initial onboarding in audit_logs
-    try {
-      db.prepare(`
-        INSERT INTO audit_logs (username, action, target, details, date)
-        VALUES (?, 'راه‌اندازی', 'راه‌اندازی اولیه', 'راه‌اندازی اولیه سیستم و ایجاد کاربر مدیر ارشد', ?)
-      `).run(data.username, new Date().toISOString());
-    } catch (auditErr) {
-      console.error('Failed to write initial audit log:', auditErr);
-    }
-
-    db.prepare('COMMIT').run();
-    return { success: true };
-  } catch (e) {
-    if (db.inTransaction) db.prepare('ROLLBACK').run();
-    console.error('Error performing onboarding:', e);
-    throw e;
-  }
-});
-
-// SESSIONS / AUTH HANDLERS
-ipcMain.handle('loginUser', (event, { username, password }) => {
-  if (!db) throw new Error("دیتابیس متصل نیست");
-  try {
-    const user = db.prepare('SELECT * FROM users WHERE username = ?').get(username);
-    if (!user) {
-      return { success: false, message: 'نام کاربری نامعتبر است.' };
-    }
-    if (user.password !== password) {
-      return { success: false, message: 'رمز عبور نادرست است.' };
-    }
-    return { 
-      success: true, 
-      user: {
-        id: user.id,
-        username: user.username,
-        role: user.role,
-        permissions: user.permissions
-      } 
-    };
-  } catch (e) {
-    console.error('Login error:', e);
-    throw e;
-  }
-});
-
-ipcMain.handle('recoverPassword', (event, { username, recoveryAnswer }) => {
-  if (!db) throw new Error("دیتابیس متصل نیست");
-  try {
-    const user = db.prepare('SELECT * FROM users WHERE username = ?').get(username);
-    if (!user) {
-      return { success: false, message: 'کاربری با این نام کاربری یافت نشد.' };
-    }
-    if (!user.recovery_answer || user.recovery_answer.trim().toLowerCase() !== recoveryAnswer.trim().toLowerCase()) {
-      return { success: false, message: 'پاسخ سوال امنیتی نادرست است.' };
-    }
-    return { success: true, password: user.password };
-  } catch (e) {
-    console.error('Password recovery error:', e);
-    throw e;
-  }
-});
-
-ipcMain.handle('getUserSecurityQuestion', (event, username) => {
-  if (!db) throw new Error("دیتابیس متصل نیست");
-  try {
-    const user = db.prepare('SELECT recovery_question FROM users WHERE username = ?').get(username);
-    if (!user) {
-      return { success: false, message: 'کاربر یافت نشد.' };
-    }
-    return { success: true, question: user.recovery_question || 'نام مربی دوران ابتدایی شما؟' };
-  } catch (e) {
-    console.error('Error fetching security question:', e);
-    throw e;
-  }
-});
-
-// SYSTEM ACCOUNTS & ACCESS RIGHTS HANDLERS
-ipcMain.handle('getSystemUsers', () => {
-  if (!db) return [];
-  try {
-    return db.prepare(`
-      SELECT u.id, u.username, u.password, u.role, u.permissions, u.person_id,
-             p.first_name, p.last_name, p.title, p.accounting_code
-      FROM users u
-      LEFT JOIN persons p ON u.person_id = p.id
-      ORDER BY u.id ASC
-    `).all();
-  } catch (e) {
-    console.error('Error fetching users:', e);
-    return [];
-  }
-});
-
-ipcMain.handle('saveUserAccount', (event, data) => {
-  if (!db) throw new Error("دیتابیس متصل نیست");
-  try {
-    if (data.id) {
-      // update
-      db.prepare(`
-        UPDATE users SET
-          username = ?,
-          password = ?,
-          role = ?,
-          permissions = ?,
-          person_id = ?
-        WHERE id = ?
-      `).run(
-        data.username,
-        data.password,
-        data.role || 'کاربر',
-        data.permissions || '*',
-        data.person_id || null,
-        data.id
-      );
-      return { success: true };
-    } else {
-      // insert
-      const stmt = db.prepare(`
-        INSERT INTO users (username, password, role, permissions, person_id)
-        VALUES (?, ?, ?, ?, ?)
-      `);
-      stmt.run(
-        data.username,
-        data.password,
-        data.role || 'کاربر',
-        data.permissions || '*',
-        data.person_id || null
-      );
-      return { success: true };
-    }
-  } catch (e) {
-    console.error('Error saving user account:', e);
-    throw e;
-  }
-});
-
-ipcMain.handle('deleteUserAccount', (event, id) => {
-  if (!db) throw new Error("دیتابیس متصل نیست");
-  try {
-    // Prevent deleting admin index/sole admin
-    const user = db.prepare('SELECT role FROM users WHERE id = ?').get(id);
-    if (user && (user.role === 'مدیر' || user.role === 'مدیر ارشد')) {
-      const adminsCount = db.prepare("SELECT count(*) as count FROM users WHERE role = 'مدیر' OR role = 'مدیر ارشد'").get().count;
-      if (adminsCount <= 1) {
-        throw new Error("امکان حذف آخرین مدیر سیستم وجود ندارد.");
-      }
-    }
-    db.prepare('DELETE FROM users WHERE id = ?').run(id);
-    return { success: true };
-  } catch (e) {
-    console.error('Error deleting user account:', e);
-    throw e;
-  }
-});
-
-ipcMain.handle('getAuditLogs', () => {
-  if (!db) return [];
-  try {
-    return db.prepare('SELECT * FROM audit_logs ORDER BY id DESC LIMIT 500').all();
-  } catch (e) {
-    console.error('Error fetching audit logs:', e);
-    return [];
-  }
-});
-
-ipcMain.handle('addAuditLog', (event, data) => {
-  if (!db) throw new Error("دیتابیس متصل نیست");
-  try {
-    const stmt = db.prepare(`
-      INSERT INTO audit_logs (username, action, target, details, date)
-      VALUES (?, ?, ?, ?, ?)
-    `);
-    stmt.run(
-      data.username,
-      data.action,
-      data.target,
-      data.details || '',
-      data.date || new Date().toISOString()
-    );
-    return { success: true };
-  } catch (e) {
-    console.error('Error adding audit log:', e);
-    throw e;
-  }
-});
-
-// ==================== CATEGORIES & BRANDS API ====================
-ipcMain.handle('getCategories', () => {
-  if (!db) return [];
-  try {
-    return db.prepare(`
-      SELECT c.*, p.name as parent_name
-      FROM categories c
-      LEFT JOIN categories p ON c.parent_id = p.id
-      ORDER BY c.id ASC
-    `).all();
-  } catch (e) {
-    console.error('Error fetching categories:', e);
-    return [];
-  }
-});
-
-ipcMain.handle('saveCategory', (event, data) => {
-  if (!db) throw new Error("دیتابیس متصل نیست");
-  try {
-    if (data.id) {
-      db.prepare(`
-        UPDATE categories SET
-          name = @name,
-          parent_id = @parent_id,
-          image = @image,
-          description = @description,
-          type = @type
-        WHERE id = @id
-      `).run({
-        id: data.id,
-        name: data.name,
-        parent_id: data.parent_id || null,
-        image: data.image || '',
-        description: data.description || '',
-        type: data.type || 'both'
-      });
-      return { success: true, id: data.id };
-    } else {
-      const info = db.prepare(`
-        INSERT INTO categories (name, parent_id, image, description, type)
-        VALUES (?, ?, ?, ?, ?)
-      `).run(
-        data.name,
-        data.parent_id || null,
-        data.image || '',
-        data.description || '',
-        data.type || 'both'
-      );
-      return { success: true, id: info.lastInsertRowid };
-    }
-  } catch (e) {
-    console.error('Error saving category:', e);
-    throw e;
-  }
-});
-
-ipcMain.handle('deleteCategory', (event, id) => {
-  if (!db) throw new Error("دیتابیس متصل نیست");
-  try {
-    db.prepare('BEGIN').run();
-    // Safe child update: set parent_id to null for any categories nested under this
-    db.prepare('UPDATE categories SET parent_id = NULL WHERE parent_id = ?').run(id);
-    // Safe product category sync: set category_id to null for products using this category
-    db.prepare('UPDATE products SET category_id = NULL WHERE category_id = ?').run(id);
-    db.prepare('DELETE FROM categories WHERE id = ?').run(id);
-    db.prepare('COMMIT').run();
-    return { success: true };
-  } catch (e) {
-    if (db.inTransaction) db.prepare('ROLLBACK').run();
-    console.error('Error deleting category:', e);
-    throw e;
-  }
-});
-
-ipcMain.handle('getBrands', () => {
-  if (!db) return [];
-  try {
-    return db.prepare('SELECT * FROM brands ORDER BY name ASC').all();
-  } catch (e) {
-    console.error('Error fetching brands:', e);
-    return [];
-  }
-});
-
-ipcMain.handle('saveBrand', (event, data) => {
-  if (!db) throw new Error("دیتابیس متصل نیست");
-  try {
-    if (data.id) {
-      db.prepare(`
-        UPDATE brands SET
-          name = @name,
-          logo = @logo,
-          description = @description
-        WHERE id = @id
-      `).run({
-        id: data.id,
-        name: data.name,
-        logo: data.logo || '',
-        description: data.description || ''
-      });
-      return { success: true, id: data.id };
-    } else {
-      const info = db.prepare(`
-        INSERT INTO brands (name, logo, description)
-        VALUES (?, ?, ?)
-      `).run(
-        data.name,
-        data.logo || '',
-        data.description || ''
-      );
-      return { success: true, id: info.lastInsertRowid };
-    }
-  } catch (e) {
-    console.error('Error saving brand:', e);
-    throw e;
-  }
-});
-
-ipcMain.handle('deleteBrand', (event, id) => {
-  if (!db) throw new Error("دیتابیس متصل نیست");
-  try {
-    db.prepare('DELETE FROM brands WHERE id = ?').run(id);
-    return { success: true };
-  } catch (e) {
-    console.error('Error deleting brand:', e);
-    throw e;
-  }
-});
-
-// ==================== EMPLOYEES & TRANSACTIONS API ====================
-ipcMain.handle('getEmployees', () => {
-  if (!db) return [];
-  try {
-    return db.prepare(`
-      SELECT e.*, p.avatar, p.national_id, p.phone1, p.accounting_code,
-        (
-          SELECT COALESCE(SUM(CASE WHEN t.type IN ('salary_accrual', 'bonus') THEN t.amount ELSE -t.amount END), 0)
-          FROM employee_transactions t
-          WHERE t.employee_id = e.id
-        ) as balance
-      FROM employees e
-      LEFT JOIN persons p ON e.person_id = p.id
-      ORDER BY e.id DESC
-    `).all();
-  } catch (e) {
-    console.error('Error fetching employees:', e);
-    return [];
-  }
-});
-
-ipcMain.handle('updateEmployee', (event, data) => {
-  if (!db) throw new Error("دیتابیس متصل نیست");
-  try {
-    db.prepare(`
-      UPDATE employees SET
-        name = @name,
-        phone = @phone,
-        position = @position,
-        salary = @salary,
-        hire_date = @hire_date,
-        person_id = @person_id
-      WHERE id = @id
-    `).run({
-      id: data.id,
-      name: data.name,
-      phone: data.phone || '',
-      position: data.position || '',
-      salary: parseFloat(data.salary || 0),
-      hire_date: data.hire_date || '',
-      person_id: data.person_id || null
-    });
-    return { success: true };
-  } catch (e) {
-    console.error('Error updating employee:', e);
-    throw e;
-  }
-});
-
-ipcMain.handle('addEmployeeDirect', (event, data) => {
-  if (!db) throw new Error("دیتابیس متصل نیست");
-  try {
-    let name = data.name || '';
-    let phone = data.phone || '';
-    if (data.person_id) {
-      const person = db.prepare('SELECT first_name, last_name, title, phone1 FROM persons WHERE id = ?').get(data.person_id);
-      if (person) {
-        name = person.title || `${person.first_name || ''} ${person.last_name || ''}`.trim();
-        phone = phone || person.phone1 || '';
-      }
-    }
-    const info = db.prepare(`
-      INSERT INTO employees (name, phone, position, salary, person_id, hire_date)
-      VALUES (?, ?, ?, ?, ?, ?)
-    `).run(
-      name,
-      phone,
-      data.position || '',
-      parseFloat(data.salary || 0),
-      data.person_id || null,
-      data.hire_date || ''
-    );
-    return { success: true, id: info.lastInsertRowid };
-  } catch (e) {
-    console.error('Error adding employee direct:', e);
-    throw e;
-  }
-});
-
-ipcMain.handle('deleteEmployee', (event, id) => {
-  if (!db) throw new Error("دیتابیس متصل نیست");
-  try {
-    db.prepare('BEGIN').run();
-    db.prepare('DELETE FROM employee_transactions WHERE employee_id = ?').run(id);
-    db.prepare('DELETE FROM employees WHERE id = ?').run(id);
-    db.prepare('COMMIT').run();
-    return { success: true };
-  } catch (e) {
-    if (db.inTransaction) db.prepare('ROLLBACK').run();
-    console.error('Error deleting employee:', e);
-    throw e;
-  }
-});
-
-ipcMain.handle('getEmployeeTransactions', (event, employeeId) => {
-  if (!db) return [];
-  try {
-    return db.prepare(`
-      SELECT * FROM employee_transactions
-      WHERE employee_id = ?
-      ORDER BY date DESC, id DESC
-    `).all(employeeId);
-  } catch (e) {
-    console.error('Error fetching employee transactions:', e);
-    return [];
-  }
-});
-
-ipcMain.handle('addEmployeeTransaction', (event, data) => {
-  if (!db) throw new Error("دیتابیس متصل نیست");
-  try {
-    const info = db.prepare(`
-      INSERT INTO employee_transactions (employee_id, date, type, amount, item_name, description)
-      VALUES (?, ?, ?, ?, ?, ?)
-    `).run(
-      parseInt(data.employee_id),
-      data.date,
-      data.type,
-      parseFloat(data.amount || 0),
-      data.item_name || '',
-      data.description || ''
-    );
-    return { success: true, id: info.lastInsertRowid };
-  } catch (e) {
-    console.error('Error adding employee transaction:', e);
-    throw e;
-  }
-});
-
-ipcMain.handle('deleteEmployeeTransaction', (event, id) => {
-  if (!db) throw new Error("دیتابیس متصل نیست");
-  try {
-    db.prepare('DELETE FROM employee_transactions WHERE id = ?').run(id);
-    return { success: true };
-  } catch (e) {
-    console.error('Error deleting employee transaction:', e);
-    throw e;
-  }
-});
-
-// ==================== WAREHOUSES & PRODUCTS API ====================
-
-ipcMain.handle('selectLocalImage', async () => {
-  const { canceled, filePaths } = await dialog.showOpenDialog({
-    filters: [
-      { name: 'Images', extensions: ['jpg', 'jpeg', 'png', 'webp', 'gif'] }
-    ],
-    properties: ['openFile']
-  });
-  if (canceled || filePaths.length === 0) {
-    return { success: false };
-  }
-  try {
-    const filePath = filePaths[0];
-    const fileBuffer = fs.readFileSync(filePath);
-    const ext = path.extname(filePath).toLowerCase().replace('.', '');
-    const base64 = `data:image/${ext || 'png'};base64,${fileBuffer.toString('base64')}`;
-    return { success: true, base64 };
-  } catch (e) {
-    console.error('Error reading local image:', e);
-    return { success: false, error: e.message };
-  }
-});
-
-ipcMain.handle('getProducts', () => {
-  if (!db) return [];
-  try {
-    return db.prepare(`
-      SELECT p.*, c.name as category_name, b.name as brand_name,
-        (SELECT COALESCE(SUM(quantity), 0) FROM warehouse_stocks WHERE product_id = p.id) as total_stock
-      FROM products p
-      LEFT JOIN categories c ON p.category_id = c.id
-      LEFT JOIN brands b ON p.brand_id = b.id
-      ORDER BY p.id DESC
-    `).all();
-  } catch (e) {
-    console.error('Error fetching products:', e);
-    return [];
-  }
-});
-
-ipcMain.handle('saveProduct', (event, data) => {
-  if (!db) throw new Error("دیتابیس متصل نیست");
-  try {
-    db.prepare('BEGIN').run();
-    let productId = data.id;
-
-    if (productId) {
-      // Update
-      db.prepare(`
-        UPDATE products SET
-          name = @name,
-          code = @code,
-          price = @price,
-          cost = @cost,
-          category_id = @category_id,
-          brand_id = @brand_id,
-          unit = @unit,
-          description = @description,
-          internal_sku = @internal_sku,
-          serial_number = @serial_number,
-          image_base64 = @image_base64,
-          type = @type,
-          required_docs = @required_docs,
-          barcode = @barcode,
-          min_stock = @min_stock,
-          wholesale_price = @wholesale_price,
-          min_selling_price = @min_selling_price,
-          status = @status
-        WHERE id = @id
-      `).run({
-        id: productId,
-        name: data.name,
-        code: data.code,
-        price: parseFloat(data.price || 0),
-        cost: parseFloat(data.cost || 0),
-        category_id: data.category_id || null,
-        brand_id: data.brand_id || null,
-        unit: data.unit || 'عدد',
-        description: data.description || '',
-        internal_sku: data.internal_sku || '',
-        serial_number: data.serial_number || '',
-        image_base64: data.image_base64 || '',
-        type: data.type || 'product',
-        required_docs: data.required_docs || null,
-        barcode: data.barcode || '',
-        min_stock: parseFloat(data.min_stock || 0),
-        wholesale_price: parseFloat(data.wholesale_price || 0),
-        min_selling_price: parseFloat(data.min_selling_price || 0),
-        status: data.status || 'فعال'
-      });
-    } else {
-      // Insert new product
-      const info = db.prepare(`
-        INSERT INTO products (name, code, price, cost, category_id, brand_id, unit, description, internal_sku, serial_number, image_base64, type, required_docs, barcode, min_stock, wholesale_price, min_selling_price, status)
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-      `).run(
-        data.name,
-        data.code,
-        parseFloat(data.price || 0),
-        parseFloat(data.cost || 0),
-        data.category_id || null,
-        data.brand_id || null,
-        data.unit || 'عدد',
-        data.description || '',
-        data.internal_sku || '',
-        data.serial_number || '',
-        data.image_base64 || '',
-        data.type || 'product',
-        data.required_docs || null,
-        data.barcode || '',
-        parseFloat(data.min_stock || 0),
-        parseFloat(data.wholesale_price || 0),
-        parseFloat(data.min_selling_price || 0),
-        data.status || 'فعال'
-      );
-      productId = info.lastInsertRowid;
-    }
-
-    // Write audit log
-    const actor = data.current_username || 'سیستم';
-    const actionName = data.id ? 'ویرایش کالا' : 'ایجاد کالا';
-    db.prepare(`
-      INSERT INTO audit_logs (username, action, target, details, date)
-      VALUES (?, ?, ?, ?, ?)
-    `).run(actor, actionName, `کالا: ${data.name}`, `${actionName} با بارکد ${data.barcode || '---'} و قیمت فروش ${data.price}`, new Date().toISOString());
-
-    // Handle warehouse initial stock placement
-    if (data.initial_warehouse_id && parseFloat(data.initial_qty || 0) > 0) {
-      const qty = parseFloat(data.initial_qty);
-      // Check if entry exists for this warehouse & product
-      const existing = db.prepare('SELECT id, quantity FROM warehouse_stocks WHERE warehouse_id = ? AND product_id = ?').get(data.initial_warehouse_id, productId);
-      if (existing) {
-        db.prepare('UPDATE warehouse_stocks SET quantity = quantity + ? WHERE id = ?').run(qty, existing.id);
-      } else {
-        db.prepare('INSERT INTO warehouse_stocks (warehouse_id, product_id, quantity) VALUES (?, ?, ?)').run(
-          data.initial_warehouse_id,
-          productId,
-          qty
-        );
-      }
-
-      // Add to general inventory transactions table for history tracking
-      db.prepare('INSERT INTO inventory (product_id, quantity_change, type, description) VALUES (?, ?, ?, ?)').run(
-        productId,
-        qty,
-        'ورود',
-        `موجودی اولیه ثبت کالا در انبار ${data.initial_warehouse_id}`
-      );
-    }
-
-    db.prepare('COMMIT').run();
-    return { success: true, id: productId };
-  } catch (e) {
-    if (db.inTransaction) db.prepare('ROLLBACK').run();
-    console.error('Error saving product:', e);
-    throw e;
-  }
-});
-
-// ==================== NEW PRODUCT HISTORY & LEDGER CHANNELS ====================
-
-ipcMain.handle('getProductSalesHistory', (event, productId) => {
-  if (!db) return [];
-  try {
-    return db.prepare(`
-      SELECT ii.*, inv.invoice_number, inv.date, inv.customer_id,
-             (p.first_name || ' ' || p.last_name) as customer_name
-      FROM invoice_items ii
-      JOIN invoices inv ON ii.invoice_id = inv.id
-      LEFT JOIN persons p ON inv.customer_id = p.id
-      WHERE ii.product_id = ?
-      ORDER BY inv.date DESC, inv.id DESC
-    `).all(productId);
-  } catch (e) {
-    console.error('Error fetching product sales history:', e);
-    return [];
-  }
-});
-
-ipcMain.handle('getProductPurchaseHistory', (event, productId) => {
-  if (!db) return [];
-  try {
-    const ledgerPurchases = db.prepare(`
-      SELECT pgl.id, pgl.date, pgl.quantity_change as quantity, pgl.unit_price_at_transaction as unit_price,
-             (pgl.quantity_change * pgl.unit_price_at_transaction) as total,
-             (p.first_name || ' ' || p.last_name) as source_name,
-             pgl.description
-      FROM person_goods_ledger pgl
-      LEFT JOIN persons p ON pgl.person_id = p.id
-      WHERE pgl.product_id = ? AND pgl.quantity_change > 0
-      ORDER BY pgl.date DESC, pgl.id DESC
-    `).all(productId);
-
-    const inventoryEntries = db.prepare(`
-      SELECT iv.id, iv.date, iv.quantity_change as quantity, p.cost as unit_price,
-             (iv.quantity_change * p.cost) as total,
-             'انبارداری / ثبت اولیه' as source_name,
-             iv.description
-      FROM inventory iv
-      JOIN products p ON iv.product_id = p.id
-      WHERE iv.product_id = ? AND iv.type = 'ورود' AND iv.quantity_change > 0
-      ORDER BY iv.date DESC, iv.id DESC
-    `).all(productId);
-
-    const combined = [...ledgerPurchases, ...inventoryEntries].sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime());
-    return combined;
-  } catch (e) {
-    console.error('Error fetching product purchase history:', e);
-    return [];
-  }
-});
-
-ipcMain.handle('getProductInventoryCirculation', (event, productId) => {
-  if (!db) return [];
-  try {
-    return db.prepare(`
-      SELECT iv.*, w.name as warehouse_name, tw.name as to_warehouse_name
-      FROM inventory iv
-      LEFT JOIN warehouses w ON iv.warehouse_id = w.id
-      LEFT JOIN warehouses tw ON iv.to_warehouse_id = tw.id
-      WHERE iv.product_id = ?
-      ORDER BY iv.date DESC, iv.id DESC
-    `).all(productId);
-  } catch (e) {
-    console.error('Error fetching product inventory circulation:', e);
-    return [];
-  }
-});
-
-ipcMain.handle('deleteProduct', (event, id) => {
-  if (!db) throw new Error("دیتابیس متصل نیست");
-  try {
-    db.prepare('BEGIN').run();
-    const product = db.prepare('SELECT name, barcode FROM products WHERE id = ?').get(id);
-    const nameStr = product ? product.name : `کالا شناسه ${id}`;
-    const barcodeStr = product ? (product.barcode || '') : '';
-
-    db.prepare('DELETE FROM warehouse_stocks WHERE product_id = ?').run(id);
-    db.prepare('DELETE FROM inventory WHERE product_id = ?').run(id);
-    db.prepare('DELETE FROM invoice_items WHERE product_id = ?').run(id);
-    db.prepare('DELETE FROM products WHERE id = ?').run(id);
-
-    // Write audit log
-    const actor = 'سیستم';
-    db.prepare(`
-      INSERT INTO audit_logs (username, action, target, details, date)
-      VALUES (?, ?, ?, ?, ?)
-    `).run(actor, 'حذف کالا', `کالا: ${nameStr}`, `حذف کالا از سیستم (بارکد: ${barcodeStr})`, new Date().toISOString());
-
-    db.prepare('COMMIT').run();
-    return { success: true };
-  } catch (e) {
-    if (db.inTransaction) db.prepare('ROLLBACK').run();
-    console.error('Error deleting product:', e);
-    throw e;
-  }
-});
-
-ipcMain.handle('getWarehouses', () => {
-  if (!db) return [];
-  try {
-    return db.prepare(`
-      SELECT w.*, 
-        (SELECT COALESCE(SUM(quantity), 0) FROM warehouse_stocks WHERE warehouse_id = w.id) as total_items,
-        (SELECT COUNT(DISTINCT product_id) FROM warehouse_stocks WHERE warehouse_id = w.id AND quantity > 0) as unique_products
-      FROM warehouses w
-      ORDER BY w.id ASC
-    `).all();
-  } catch (e) {
-    console.error('Error fetching warehouses:', e);
-    return [];
-  }
-});
-
-ipcMain.handle('saveWarehouse', (event, data) => {
-  if (!db) throw new Error("دیتابیس متصل نیست");
-  try {
-    if (data.id) {
-      db.prepare(`
-        UPDATE warehouses SET
-          name = @name,
-          code = @code,
-          address = @address,
-          description = @description
-        WHERE id = @id
-      `).run({
-        id: data.id,
-        name: data.name,
-        code: data.code,
-        address: data.address || '',
-        description: data.description || ''
-      });
-      return { success: true, id: data.id };
-    } else {
-      const info = db.prepare(`
-        INSERT INTO warehouses (name, code, address, description)
-        VALUES (?, ?, ?, ?)
-      `).run(
-        data.name,
-        data.code,
-        data.address || '',
-        data.description || ''
-      );
-      return { success: true, id: info.lastInsertRowid };
-    }
-  } catch (e) {
-    console.error('Error saving warehouse:', e);
-    throw e;
-  }
-});
-
-ipcMain.handle('deleteWarehouse', (event, id) => {
-  if (!db) throw new Error("دیتابیس متصل نیست");
-  try {
-    db.prepare('BEGIN').run();
-    // Default warehouse WH-01 cannot be deleted
-    const wh = db.prepare('SELECT code FROM warehouses WHERE id = ?').get(id);
-    if (wh && wh.code === 'WH-01') {
-      throw new Error('انبار اصلی سیستم قابل حذف نمی‌باشد');
-    }
-    db.prepare('DELETE FROM warehouse_stocks WHERE warehouse_id = ?').run(id);
-    db.prepare('DELETE FROM warehouses WHERE id = ?').run(id);
-    db.prepare('COMMIT').run();
-    return { success: true };
-  } catch (e) {
-    if (db.inTransaction) db.prepare('ROLLBACK').run();
-    console.error('Error deleting warehouse:', e);
-    throw e;
-  }
-});
-
-ipcMain.handle('getWarehouseStocks', (event, warehouseId) => {
-  if (!db) return [];
-  try {
-    return db.prepare(`
-      SELECT ws.*, p.name as product_name, p.code as product_code, p.unit, p.price, p.cost
-      FROM warehouse_stocks ws
-      JOIN products p ON ws.product_id = p.id
-      WHERE ws.warehouse_id = ? AND ws.quantity > 0
-      ORDER BY p.name ASC
-    `).all(warehouseId);
-  } catch (e) {
-    console.error('Error fetching warehouse stocks:', e);
-    return [];
-  }
-});
-
-ipcMain.handle('getInventoryHistory', (event) => {
-  if (!db) return [];
-  try {
-    return db.prepare(`
-      SELECT iv.*, p.name as product_name, p.code as product_code, p.unit, p.price, p.cost,
-             w.name as warehouse_name, tw.name as to_warehouse_name
-      FROM inventory iv
-      JOIN products p ON iv.product_id = p.id
-      LEFT JOIN warehouses w ON iv.warehouse_id = w.id
-      LEFT JOIN warehouses tw ON iv.to_warehouse_id = tw.id
-      ORDER BY iv.id DESC
-    `).all();
-  } catch (e) {
-    console.error('Error fetching inventory history:', e);
-    return [];
-  }
-});
-
-ipcMain.handle('addWarehouseTransaction', (event, data) => {
-  if (!db) throw new Error("دیتابیس متصل نیست");
-  try {
-    db.prepare('BEGIN').run();
-    const { warehouse_id, to_warehouse_id, product_id, quantity_change, type, description, date, username } = data;
-    const qty = parseFloat(quantity_change);
-
-    if (type === 'ورود') {
-      const existing = db.prepare('SELECT id, quantity FROM warehouse_stocks WHERE warehouse_id = ? AND product_id = ?').get(warehouse_id, product_id);
-      if (existing) {
-        db.prepare('UPDATE warehouse_stocks SET quantity = quantity + ? WHERE id = ?').run(qty, existing.id);
-      } else {
-        db.prepare('INSERT INTO warehouse_stocks (warehouse_id, product_id, quantity) VALUES (?, ?, ?)').run(warehouse_id, product_id, qty);
-      }
-      const balanceAfter = db.prepare('SELECT COALESCE(SUM(quantity), 0) as total FROM warehouse_stocks WHERE product_id = ?').get(product_id).total;
-      db.prepare(`
-        INSERT INTO inventory (product_id, quantity_change, type, description, date, warehouse_id, username, balance_after)
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?)
-      `).run(product_id, qty, 'ورود', description, date || new Date().toISOString(), warehouse_id, username || null, balanceAfter);
-
-    } else if (type === 'خروج') {
-      const existing = db.prepare('SELECT id, quantity FROM warehouse_stocks WHERE warehouse_id = ? AND product_id = ?').get(warehouse_id, product_id);
-      if (!existing || existing.quantity < qty) {
-        throw new Error('موجودی کافی در این انبار جهت خروج وجود ندارد');
-      }
-      db.prepare('UPDATE warehouse_stocks SET quantity = quantity - ? WHERE id = ?').run(qty, existing.id);
-      
-      const balanceAfter = db.prepare('SELECT COALESCE(SUM(quantity), 0) as total FROM warehouse_stocks WHERE product_id = ?').get(product_id).total;
-      db.prepare(`
-        INSERT INTO inventory (product_id, quantity_change, type, description, date, warehouse_id, username, balance_after)
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?)
-      `).run(product_id, -qty, 'خروج', description, date || new Date().toISOString(), warehouse_id, username || null, balanceAfter);
-
-    } else if (type === 'انتقال') {
-      if (!to_warehouse_id) throw new Error('انبار مقصد مشخص نشده است');
-      if (parseInt(warehouse_id) === parseInt(to_warehouse_id)) throw new Error('انبار مبدا و مقصد نمی‌توانند یکسان باشند');
-
-      const sourceStock = db.prepare('SELECT id, quantity FROM warehouse_stocks WHERE warehouse_id = ? AND product_id = ?').get(warehouse_id, product_id);
-      if (!sourceStock || sourceStock.quantity < qty) {
-        throw new Error('موجودی کافی در انبار مبدا جهت انتقال وجود ندارد');
-      }
-      db.prepare('UPDATE warehouse_stocks SET quantity = quantity - ? WHERE id = ?').run(qty, sourceStock.id);
-
-      const destStock = db.prepare('SELECT id, quantity FROM warehouse_stocks WHERE warehouse_id = ? AND product_id = ?').get(to_warehouse_id, product_id);
-      if (destStock) {
-        db.prepare('UPDATE warehouse_stocks SET quantity = quantity + ? WHERE id = ?').run(qty, destStock.id);
-      } else {
-        db.prepare('INSERT INTO warehouse_stocks (warehouse_id, product_id, quantity) VALUES (?, ?, ?)').run(to_warehouse_id, product_id, qty);
-      }
-
-      const balanceAfter = db.prepare('SELECT COALESCE(SUM(quantity), 0) as total FROM warehouse_stocks WHERE product_id = ?').get(product_id).total;
-      db.prepare(`
-        INSERT INTO inventory (product_id, quantity_change, type, description, date, warehouse_id, to_warehouse_id, username, balance_after)
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
-      `).run(product_id, qty, 'انتقال', description, date || new Date().toISOString(), warehouse_id, to_warehouse_id, username || null, balanceAfter);
-    }
-
-    db.prepare('COMMIT').run();
-    return { success: true };
-  } catch (e) {
-    if (db.inTransaction) db.prepare('ROLLBACK').run();
-    console.error('Error adding warehouse transaction:', e);
-    return { success: false, error: e.message };
-  }
-});
-
-ipcMain.handle('applyPriceUpdate', (event, data) => {
-  if (!db) throw new Error("دیتابیس متصل نیست");
-  try {
-    db.prepare('BEGIN').run();
-    const info = db.prepare(`
-      INSERT INTO price_updates (update_date, username, description, rollback_status)
-      VALUES (?, ?, ?, 0)
-    `).run(
-      data.update_date,
-      data.username,
-      data.description || ''
-    );
-    const updateId = info.lastInsertRowid;
-
-    const itemStmt = db.prepare(`
-      INSERT INTO price_update_items (price_update_id, product_id, old_price, new_price, old_cost, new_cost)
-      VALUES (?, ?, ?, ?, ?, ?)
-    `);
-
-    const prodStmt = db.prepare(`
-      UPDATE products SET price = ?, cost = ? WHERE id = ?
-    `);
-
-    for (const item of data.items) {
-      itemStmt.run(
-        updateId,
-        item.product_id,
-        parseFloat(item.old_price),
-        parseFloat(item.new_price),
-        parseFloat(item.old_cost),
-        parseFloat(item.new_cost)
-      );
-
-      prodStmt.run(
-        parseFloat(item.new_price),
-        parseFloat(item.new_cost),
-        item.product_id
-      );
-    }
-
-    db.prepare('COMMIT').run();
-    return { success: true, id: updateId };
-  } catch (e) {
-    if (db.inTransaction) db.prepare('ROLLBACK').run();
-    console.error('Error applying price update:', e);
-    throw e;
-  }
-});
-
-ipcMain.handle('getPriceUpdates', () => {
-  if (!db) return [];
-  try {
-    return db.prepare(`
-      SELECT pu.*, 
-        (SELECT COUNT(*) FROM price_update_items WHERE price_update_id = pu.id) as item_count
-      FROM price_updates pu
-      ORDER BY pu.id DESC
-    `).all();
-  } catch (e) {
-    console.error('Error fetching price updates:', e);
-    return [];
-  }
-});
-
-ipcMain.handle('getPriceUpdateItems', (event, updateId) => {
-  if (!db) return [];
-  try {
-    return db.prepare(`
-      SELECT pui.*, p.name as product_name, p.code as product_code, p.type
-      FROM price_update_items pui
-      JOIN products p ON pui.product_id = p.id
-      WHERE pui.price_update_id = ?
-    `).all(updateId);
-  } catch (e) {
-    console.error('Error fetching price update items:', e);
-    return [];
-  }
-});
-
-ipcMain.handle('rollbackPriceUpdate', (event, updateId) => {
-  if (!db) throw new Error("دیتابیس متصل نیست");
-  try {
-    db.prepare('BEGIN').run();
-    const updateRecord = db.prepare('SELECT rollback_status FROM price_updates WHERE id = ?').get(updateId);
-    if (!updateRecord) {
-      throw new Error("سند تغییرات قیمتی یافت نشد");
-    }
-    if (updateRecord.rollback_status === 1) {
-      throw new Error("این سند هم‌اکنون به عقب برگشت داده شده است");
-    }
-
-    const items = db.prepare('SELECT * FROM price_update_items WHERE price_update_id = ?').all(updateId);
-    const prodStmt = db.prepare(`
-      UPDATE products SET price = ?, cost = ? WHERE id = ?
-    `);
-
-    for (const item of items) {
-      prodStmt.run(
-        parseFloat(item.old_price),
-        parseFloat(item.old_cost),
-        item.product_id
-      );
-    }
-
-    db.prepare('UPDATE price_updates SET rollback_status = 1 WHERE id = ?').run(updateId);
-    db.prepare('COMMIT').run();
-    return { success: true };
-  } catch (e) {
-    if (db.inTransaction) db.prepare('ROLLBACK').run();
-    console.error('Error rolling back price update:', e);
-    throw e;
-  }
-});
-
-ipcMain.handle('saveInvoice', (event, data) => {
-  if (!db) throw new Error("دیتابیس متصل نیست");
-  try {
-    db.prepare('BEGIN').run();
-
-    // 1. Generate unique invoice number if not provided
-    let invoiceNumber = data.invoice_number;
-    if (!invoiceNumber) {
-      const count = db.prepare('SELECT COUNT(*) as c FROM invoices').get().c;
-      const prefix = data.type === 'خرید' ? 'PUR' : 'INV';
-      invoiceNumber = `${prefix}-${new Date().toISOString().slice(2,10).replace(/-/g,'')}-${String(count + 1).padStart(4, '0')}`;
-    }
-
-    // 2. Insert invoice details
-    const info = db.prepare(`
-      INSERT INTO invoices (
-        invoice_number, customer_id, total_amount, discount, tax, final_amount, status, 
-        payment_method, payment_details, description, type, received_amount, date, username,
-        payment_cash, payment_card, payment_bank, payment_cheque, payment_credit, payment_installment
-      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-    `).run(
-      invoiceNumber,
-      data.customer_id || null, 
-      parseFloat(data.total_amount || 0),
-      parseFloat(data.discount || 0),
-      parseFloat(data.tax || 0),
-      parseFloat(data.final_amount || 0),
-      data.status || 'پرداخت شده',
-      data.payment_method || 'کارتخوان',
-      data.payment_details || '',
-      data.description || '',
-      data.type || 'فروش',
-      parseFloat(data.received_amount || 0),
-      data.date || new Date().toISOString(),
-      data.username || null,
-      parseFloat(data.payment_cash || 0),
-      parseFloat(data.payment_card || 0),
-      parseFloat(data.payment_bank || 0),
-      parseFloat(data.payment_cheque || 0),
-      parseFloat(data.payment_credit || 0),
-      parseFloat(data.payment_installment || 0)
-    );
-    const invoiceId = info.lastInsertRowid;
-
-    // 3. Insert invoice items, calculate profit, update warehouse stock, and save last purchase price
-    const itemStmt = db.prepare(`
-      INSERT INTO invoice_items (invoice_id, product_id, quantity, unit_price, total, discount_percent, discount_amount)
-      VALUES (?, ?, ?, ?, ?, ?, ?)
-    `);
-
-    const checkStockStmt = db.prepare('SELECT id, quantity FROM warehouse_stocks WHERE warehouse_id = 1 AND product_id = ?');
-    const updateStockStmt = db.prepare('UPDATE warehouse_stocks SET quantity = quantity - ? WHERE id = ?');
-    const addStockStmt = db.prepare('UPDATE warehouse_stocks SET quantity = quantity + ? WHERE id = ?');
-    const insertStockStmt = db.prepare('INSERT INTO warehouse_stocks (warehouse_id, product_id, quantity) VALUES (1, ?, ?)');
-
-    let totalProfit = 0;
-    const isPurchase = (data.type === 'خرید');
-
-    for (const item of data.items) {
-      itemStmt.run(
-        invoiceId,
-        item.product_id,
-        parseFloat(item.quantity || 1),
-        parseFloat(item.unit_price || 0),
-        parseFloat(item.total || 0),
-        parseFloat(item.discount_percent || 0),
-        parseFloat(item.discount_amount || 0)
-      );
-
-      // Check product details to calculate profit or update purchase price
-      const prod = db.prepare('SELECT type, cost FROM products WHERE id = ?').get(item.product_id);
-      const qty = parseFloat(item.quantity || 1);
-      const price = parseFloat(item.unit_price || 0);
-
-      if (isPurchase) {
-        // Save the last purchase price (cost) in the products table
-        db.prepare('UPDATE products SET cost = ? WHERE id = ?').run(price, item.product_id);
-
-        // Increase warehouse stock for products
-        if (prod && prod.type === 'product') {
-          const existingStock = checkStockStmt.get(item.product_id);
-          if (existingStock) {
-            addStockStmt.run(qty, existingStock.id);
-          } else {
-            insertStockStmt.run(item.product_id, qty);
+    const configPath = getDbConfigPath();
+    if (fs.existsSync(configPath)) {
+      const config = JSON.parse(fs.readFileSync(configPath, 'utf8') || '{}');
+      if (config.sqliteDbPath) {
+        let targetPath = config.sqliteDbPath.trim();
+        // If directory, append filename
+        try {
+          if (fs.existsSync(targetPath) && fs.lstatSync(targetPath).isDirectory()) {
+            targetPath = path.join(targetPath, 'database_sqlite_v2.db');
           }
+        } catch (e) {}
 
-          // Cardex log in inventory table
-          db.prepare(`
-            INSERT INTO inventory (product_id, quantity_change, type, description, date, warehouse_id, username)
-            VALUES (?, ?, 'خرید', ?, ?, 1, ?)
-          `).run(item.product_id, qty, `ورود بابت فاکتور خرید شماره ${invoiceNumber}`, data.date || new Date().toISOString(), data.username || null);
+        if (!targetPath.endsWith('.db')) {
+          try {
+            fs.mkdirSync(targetPath, { recursive: true });
+            targetPath = path.join(targetPath, 'database_sqlite_v2.db');
+          } catch (e) {}
         }
-      } else {
-        // Sale: calculate profit
-        const cost = prod ? (prod.cost || 0) : 0;
-        const itemProfit = qty * (price - cost);
-        totalProfit += itemProfit;
 
-        // Decrease stock
-        if (prod && prod.type === 'product') {
-          const deliveredQty = item.delivered_qty !== undefined ? parseFloat(item.delivered_qty) : qty;
-          const existingStock = checkStockStmt.get(item.product_id);
-          if (existingStock) {
-            updateStockStmt.run(deliveredQty, existingStock.id);
-          } else {
-            insertStockStmt.run(item.product_id, -deliveredQty);
+        const dirName = path.dirname(targetPath);
+        if (!fs.existsSync(dirName)) {
+          fs.mkdirSync(dirName, { recursive: true });
+        }
+        return targetPath;
+      }
+    }
+  } catch (err) {
+    console.error('Error reading custom SQLite path config:', err);
+  }
+
+  const docPath = app.getPath('documents');
+  const dir = path.join(docPath, 'MediaCenter');
+  if (!fs.existsSync(dir)) {
+    fs.mkdirSync(dir, { recursive: true });
+  }
+  return path.join(dir, 'database_sqlite_v2.db');
+};
+
+let sqliteDb = null;
+let isSqliteInitialized = false;
+let sqliteInitError = null;
+
+const DB_SCHEMAS = {
+  users: {
+    definition: `CREATE TABLE IF NOT EXISTS users (
+      id TEXT PRIMARY KEY,
+      fullName TEXT,
+      shopName TEXT,
+      phone TEXT,
+      phoneSecondary TEXT,
+      email TEXT UNIQUE,
+      password TEXT,
+      securityQuestion TEXT,
+      securityAnswer TEXT,
+      registeredAt TEXT
+    )`,
+    indexes: []
+  },
+  movies: {
+    definition: `CREATE TABLE IF NOT EXISTS movies (
+      id TEXT PRIMARY KEY,
+      category TEXT,
+      titleFa TEXT,
+      titleEn TEXT,
+      year TEXT,
+      director TEXT,
+      writer TEXT,
+      actors TEXT,
+      duration TEXT,
+      country TEXT,
+      language TEXT,
+      imdbRating TEXT,
+      quality TEXT,
+      subtitle TEXT,
+      genres TEXT,
+      poster TEXT,
+      summary TEXT,
+      filePath TEXT,
+      purchasePrice REAL,
+      salePrice REAL,
+      addedAt TEXT,
+      collectionName TEXT,
+      gallery TEXT
+    )`,
+    indexes: [
+      'CREATE INDEX IF NOT EXISTS idx_movies_added_at ON movies(addedAt)',
+      'CREATE INDEX IF NOT EXISTS idx_movies_category ON movies(category)'
+    ],
+    migrations: [
+      "ALTER TABLE movies ADD COLUMN collectionName TEXT",
+      "ALTER TABLE movies ADD COLUMN gallery TEXT"
+    ]
+  },
+  series: {
+    definition: `CREATE TABLE IF NOT EXISTS series (
+      id TEXT PRIMARY KEY,
+      category TEXT,
+      titleFa TEXT,
+      titleEn TEXT,
+      year TEXT,
+      director TEXT,
+      writer TEXT,
+      actors TEXT,
+      episodeDuration TEXT,
+      country TEXT,
+      language TEXT,
+      imdbRating TEXT,
+      quality TEXT,
+      subtitle TEXT,
+      genres TEXT,
+      poster TEXT,
+      summary TEXT,
+      filePath TEXT,
+      purchasePrice REAL,
+      salePrice REAL,
+      seasons TEXT,
+      addedAt TEXT,
+      totalEpisodes INTEGER DEFAULT 0,
+      myEpisodesCount INTEGER DEFAULT 0,
+      releasedEpisodesCount INTEGER DEFAULT 0,
+      isEnded INTEGER DEFAULT 0,
+      isEndedText TEXT,
+      gallery TEXT
+    )`,
+    indexes: [
+      'CREATE INDEX IF NOT EXISTS idx_series_added_at ON series(addedAt)',
+      'CREATE INDEX IF NOT EXISTS idx_series_category ON series(category)'
+    ],
+    migrations: [
+      "ALTER TABLE series ADD COLUMN totalEpisodes INTEGER DEFAULT 0",
+      "ALTER TABLE series ADD COLUMN myEpisodesCount INTEGER DEFAULT 0",
+      "ALTER TABLE series ADD COLUMN releasedEpisodesCount INTEGER DEFAULT 0",
+      "ALTER TABLE series ADD COLUMN isEnded INTEGER DEFAULT 0",
+      "ALTER TABLE series ADD COLUMN isEndedText TEXT",
+      "ALTER TABLE series ADD COLUMN gallery TEXT"
+    ]
+  },
+  sales: {
+    definition: `CREATE TABLE IF NOT EXISTS sales (
+      id TEXT PRIMARY KEY,
+      date TEXT,
+      customerName TEXT,
+      mediaId TEXT,
+      mediaTitle TEXT,
+      mediaType TEXT,
+      salesType TEXT,
+      details TEXT,
+      purchasePrice REAL,
+      salePrice REAL,
+      discount REAL,
+      items TEXT
+    )`,
+    indexes: [
+      'CREATE INDEX IF NOT EXISTS idx_sales_date ON sales(date)',
+      'CREATE INDEX IF NOT EXISTS idx_sales_media ON sales(mediaId)'
+    ]
+  },
+  songs: {
+    definition: `CREATE TABLE IF NOT EXISTS songs (
+      id TEXT PRIMARY KEY,
+      titleFa TEXT,
+      titleEn TEXT,
+      artist TEXT,
+      duration INTEGER,
+      quality TEXT,
+      filePath TEXT,
+      tags TEXT,
+      addedAt TEXT
+    )`,
+    indexes: [
+      'CREATE INDEX IF NOT EXISTS idx_songs_added_at ON songs(addedAt)'
+    ]
+  },
+  playlists: {
+    definition: `CREATE TABLE IF NOT EXISTS playlists (
+      id TEXT PRIMARY KEY,
+      name TEXT,
+      description TEXT,
+      color TEXT
+    )`
+  },
+  settings: {
+    definition: `CREATE TABLE IF NOT EXISTS settings (
+      key TEXT PRIMARY KEY,
+      value TEXT
+    )`
+  }
+};
+
+function initSqlite() {
+  try {
+    const Database = require('better-sqlite3');
+    const dbPath = getSqliteDbPath();
+    sqliteDb = new Database(dbPath, { fileMustExist: false });
+    console.log('Opened SQLite database file successfully via better-sqlite3:', dbPath);
+    
+    // Enable Foreign Keys
+    sqliteDb.pragma('foreign_keys = ON');
+    
+    createTables();
+    isSqliteInitialized = true;
+    sqliteInitError = null;
+  } catch (err) {
+    console.error('Critical SQLite initialization failed:', err);
+    isSqliteInitialized = false;
+    sqliteInitError = err.message || String(err);
+    
+    // Display native error box as SQLite is the only database
+    app.whenReady().then(() => {
+      dialog.showErrorBox(
+        'خطای راه‌اندازی پایگاه داده (SQLite Database Error)',
+        'راه‌اندازی پایگاه داده بومی SQLite با خطا مواجه شد:\n' + sqliteInitError + '\n\nبرنامه بدون پایگاه داده بومی قادر به ادامه کار نیست. لطفاً نصب مجدد برنامه یا نصب مجدد ماژول better-sqlite3 را بررسی کنید.'
+      );
+    });
+  }
+}
+
+function createTables() {
+  if (!sqliteDb) return;
+  try {
+    for (const [tableName, schema] of Object.entries(DB_SCHEMAS)) {
+      // 1. Create table if not exists
+      sqliteDb.prepare(schema.definition).run();
+      
+      // 2. Run schema column additions migrations (fail-safe)
+      if (schema.migrations) {
+        for (const migrationSql of schema.migrations) {
+          try {
+            sqliteDb.prepare(migrationSql).run();
+          } catch (e) {
+            // Safe to ignore if column already exists
           }
+        }
+      }
+      
+      // 3. Create indexes for optimization
+      if (schema.indexes) {
+        for (const indexSql of schema.indexes) {
+          try {
+            sqliteDb.prepare(indexSql).run();
+          } catch (e) {
+            console.error(`Failed to create index for table ${tableName}:`, e.message);
+          }
+        }
+      }
+    }
+    console.log('All SQLite tables, indexes and migrations initialized and verified via better-sqlite3.');
+  } catch (err) {
+    console.error('Error initializing tables via better-sqlite3:', err);
+  }
+}
 
-          // If this item is delivered from a previous goods demand, update the demand
-          if (item.demand_id) {
-            const demand = db.prepare('SELECT * FROM person_goods_demands WHERE id = ?').get(item.demand_id);
-            if (demand) {
-              const newDelivered = demand.delivered_qty + qty;
-              const newRemaining = Math.max(0, demand.remaining_qty - qty);
-              db.prepare('UPDATE person_goods_demands SET delivered_qty = ?, remaining_qty = ? WHERE id = ?')
-                .run(newDelivered, newRemaining, item.demand_id);
+ipcMain.handle('read-db-file', async () => {
+  try {
+    const dbPath = getDbPath();
+    if (!fs.existsSync(dbPath)) {
+      return {};
+    }
+    const data = fs.readFileSync(dbPath, 'utf8');
+    return JSON.parse(data || '{}');
+  } catch (err) {
+    console.error('Error reading physical database:', err);
+    return {};
+  }
+});
 
-              // Log in person_goods_ledger so that it registers in their goods ledger/statement
-              db.prepare(`
-                INSERT INTO person_goods_ledger (person_id, product_id, date, quantity_change, unit_price_at_transaction, description)
-                VALUES (?, ?, ?, ?, ?, ?)
-              `).run(
-                data.customer_id,
-                item.product_id,
-                data.date || new Date().toISOString().slice(0, 10),
-                -qty,
-                0,
-                `تحویل کالا از بابت طلب قبلی (فاکتور فروش جاری: ${invoiceNumber})`
-              );
+ipcMain.handle('write-db-file', async (event, fullData) => {
+  try {
+    const dbPath = getDbPath();
+    fs.writeFileSync(dbPath, JSON.stringify(fullData, null, 2), 'utf8');
+    return { success: true };
+  } catch (err) {
+    console.error('Error writing physical database:', err);
+    return { success: false, error: err.message };
+  }
+});
+
+ipcMain.handle('get-db-file-path', async () => {
+  try {
+    if (isSqliteInitialized && sqliteDb) {
+      return getSqliteDbPath();
+    }
+    return getDbPath();
+  } catch (err) {
+    return '';
+  }
+});
+
+ipcMain.handle('set-sqlite-db-path', async (event, newPath) => {
+  try {
+    if (!newPath || typeof newPath !== 'string') {
+      return { success: false, error: 'مسیر نامعتبر است.' };
+    }
+
+    const trimmedPath = newPath.trim();
+    let targetFile = trimmedPath;
+    
+    // Check if newPath is a directory or file path
+    let isDir = false;
+    try {
+      if (fs.existsSync(trimmedPath) && fs.lstatSync(trimmedPath).isDirectory()) {
+        isDir = true;
+      }
+    } catch (e) {}
+
+    if (isDir) {
+      targetFile = path.join(trimmedPath, 'database_sqlite_v2.db');
+    } else if (!trimmedPath.endsWith('.db')) {
+      try {
+        fs.mkdirSync(trimmedPath, { recursive: true });
+        targetFile = path.join(trimmedPath, 'database_sqlite_v2.db');
+      } catch (e) {
+        // Assume direct file path
+      }
+    }
+
+    // Ensure containing directory exists
+    const targetDir = path.dirname(targetFile);
+    if (!fs.existsSync(targetDir)) {
+      fs.mkdirSync(targetDir, { recursive: true });
+    }
+
+    const oldPath = getSqliteDbPath();
+    if (path.resolve(oldPath) === path.resolve(targetFile)) {
+      return { success: true, path: targetFile, message: 'مسیر جدید با مسیر قبلی یکسان است.' };
+    }
+
+    // Close the current SQLite DB if active
+    if (sqliteDb) {
+      try {
+        sqliteDb.close();
+      } catch (err) {
+        console.error('Error closing legacy SQLite DB connection:', err);
+      }
+      sqliteDb = null;
+    }
+
+    // Copy DB file over if it exists
+    if (fs.existsSync(oldPath)) {
+      try {
+        fs.copyFileSync(oldPath, targetFile);
+        console.log(`Successfully moved/copied SQLite DB file from ${oldPath} to ${targetFile}`);
+      } catch (copyErr) {
+        console.error('Could not copy SQLite file:', copyErr);
+      }
+    }
+
+    // Save configuration file
+    const configPath = getDbConfigPath();
+    fs.writeFileSync(configPath, JSON.stringify({ sqliteDbPath: targetFile }, null, 2), 'utf8');
+
+    // Reopen database connection
+    let reinitSuccess = false;
+    let errorMsg = '';
+    try {
+      const Database = require('better-sqlite3');
+      sqliteDb = new Database(targetFile, { fileMustExist: false });
+      console.log('Opened SQLite database file successfully at:', targetFile);
+      createTables();
+      reinitSuccess = true;
+      isSqliteInitialized = true;
+    } catch (err) {
+      errorMsg = err.message;
+      isSqliteInitialized = false;
+    }
+
+    if (reinitSuccess) {
+      return { success: true, path: targetFile };
+    } else {
+      return { success: false, error: 'موتور دیتابیس نتوانست دیتابیس را در مسیر جدید لود کند: ' + errorMsg };
+    }
+  } catch (err) {
+    return { success: false, error: err.message };
+  }
+});
+
+ipcMain.handle('is-sqlite-available', async () => {
+  return isSqliteInitialized && sqliteDb !== null;
+});
+
+ipcMain.handle('run-sql', async (event, sql, params = []) => {
+  if (!isSqliteInitialized || !sqliteDb) {
+    return { success: false, error: 'SQLite database is not initialized.' };
+  }
+  try {
+    const isQuery = sql.trim().toUpperCase().startsWith('SELECT') || sql.trim().toUpperCase().startsWith('PRAGMA') || sql.trim().toUpperCase().startsWith('EXPLAIN');
+    const stmt = sqliteDb.prepare(sql);
+    const sqlParams = params || [];
+    if (isQuery) {
+      const rows = stmt.all(sqlParams);
+      return { success: true, rows };
+    } else {
+      const info = stmt.run(sqlParams);
+      return { success: true, lastID: info.lastInsertRowid, changes: info.changes };
+    }
+  } catch (err) {
+    return { success: false, error: err.message };
+  }
+});
+
+ipcMain.handle('exists-file', async (event, filepath) => {
+  try {
+    return { success: true, exists: fs.existsSync(filepath) };
+  } catch (err) {
+    return { success: false, exists: false, error: err.message };
+  }
+});
+
+ipcMain.handle('resolve-video-path', async (event, basePathWithoutExt) => {
+  try {
+    const extensions = ['.mkv', '.mp4', '.3gp', '.avi', '.m4v', '.ts', '.flv', '.mov', '.webm', '.MKV', '.MP4', '.3GP', '.3gp', '.3GPP'];
+    for (const ext of extensions) {
+      const fullPath = basePathWithoutExt + ext;
+      if (fs.existsSync(fullPath)) {
+        return { success: true, resolvedPath: fullPath, ext: ext };
+      }
+    }
+    // Try to check if the file with already existing extension is there, or default to mkv
+    return { success: false, resolvedPath: basePathWithoutExt + '.mkv', ext: '.mkv' };
+  } catch (err) {
+    return { success: false, resolvedPath: basePathWithoutExt + '.mkv', ext: '.mkv', error: err.message };
+  }
+});
+
+// Recursively lists all video files in a folder to parse and map seasons and episodes
+ipcMain.handle('scan-series-directory', async (event, dirpath) => {
+  try {
+    if (!dirpath || !fs.existsSync(dirpath)) {
+      return { success: false, error: 'Directory does not exist or invalid path' };
+    }
+    
+    const results = [];
+    function scanDir(currentPath) {
+      const entries = fs.readdirSync(currentPath);
+      for (const entry of entries) {
+        const fullPath = path.join(currentPath, entry);
+        try {
+          const stat = fs.statSync(fullPath);
+          if (stat.isDirectory()) {
+            scanDir(fullPath);
+          } else {
+            const ext = path.extname(fullPath).toLowerCase();
+            const videoExtensions = ['.mp4', '.mkv', '.3gp', '.avi', '.m4v', '.ts', '.flv', '.mov', '.webm', '.3gpp'];
+            if (videoExtensions.includes(ext)) {
+              results.push({
+                name: entry,
+                path: fullPath,
+                ext: ext,
+                size: stat.size
+              });
             }
           }
-
-          // Cardex log in inventory table
-          const cardexDesc = item.demand_id 
-            ? `خروج بابت تحویل کالا از طلب قبلی (فاکتور جاری: ${invoiceNumber})`
-            : (deliveredQty < qty 
-                ? `خروج بابت تحویل فیزیکی فاکتور فروش شماره ${invoiceNumber} (مقدار کل: ${qty}، تحویل‌شده: ${deliveredQty})`
-                : `خروج بابت فاکتور فروش شماره ${invoiceNumber}`);
-
-          const cardexQty = item.demand_id ? qty : deliveredQty;
-          db.prepare(`
-            INSERT INTO inventory (product_id, quantity_change, type, description, date, warehouse_id, username)
-            VALUES (?, ?, 'فروش', ?, ?, 1, ?)
-          `).run(item.product_id, -cardexQty, cardexDesc, data.date || new Date().toISOString(), data.username || null);
+        } catch (e) {
+          // Ignore unreadable entries
         }
       }
     }
-
-    if (!isPurchase) {
-      // Adjust total profit by subtracting total invoice-level discount
-      totalProfit -= parseFloat(data.discount || 0);
-    }
-
-    // 4. Record Supplier/Customer Financial Transaction (گردش حساب طرف حساب)
-    if (data.customer_id) {
-      const isPaid = (data.status === 'پرداخت شده');
-      const finalAmt = parseFloat(data.final_amount || 0);
-      const recvAmt = parseFloat(data.received_amount || 0);
-      const txDate = data.date || new Date().toISOString().slice(0, 10);
-
-      if (isPurchase) {
-        // Purchase:
-        if (isPaid) {
-          // Record we owe the supplier (credit)
-          db.prepare(`
-            INSERT INTO person_financial_ledger (person_id, date, type, amount, description)
-            VALUES (?, ?, 'invoice_credit', ?, ?)
-          `).run(
-            data.customer_id,
-            txDate,
-            -finalAmt,
-            `ثبت فاکتور خرید شماره ${invoiceNumber}`
-          );
-
-          // Record we paid them (debit)
-          if (recvAmt > 0) {
-            db.prepare(`
-              INSERT INTO person_financial_ledger (person_id, date, type, amount, description)
-              VALUES (?, ?, 'paid', ?, ?)
-            `).run(
-              data.customer_id,
-              txDate,
-              recvAmt,
-              `تسویه نقدی/بانکی فاکتور خرید شماره ${invoiceNumber}`
-            );
-          }
-        } else {
-          // Unpaid or partially paid: unpaid part will count dynamically, only log payment portion as debit
-          if (recvAmt > 0) {
-            db.prepare(`
-              INSERT INTO person_financial_ledger (person_id, date, type, amount, description)
-              VALUES (?, ?, 'paid', ?, ?)
-            `).run(
-              data.customer_id,
-              txDate,
-              recvAmt,
-              `پرداخت نقدی/بانکی بابت فاکتور خرید شماره ${invoiceNumber}`
-            );
-          }
-        }
-      } else {
-        // Sale:
-        if (isPaid) {
-          // Fully paid invoice: Log debit (the sale) and credit (the payment) so both appear in statement of accounts
-          db.prepare(`
-            INSERT INTO person_financial_ledger (person_id, date, type, amount, description)
-            VALUES (?, ?, 'invoice_debit', ?, ?)
-          `).run(
-            data.customer_id,
-            txDate,
-            finalAmt,
-            `خرید کالا/خدمات فاکتور فروش شماره ${invoiceNumber}`
-          );
-
-          if (recvAmt > 0) {
-            db.prepare(`
-              INSERT INTO person_financial_ledger (person_id, date, type, amount, description)
-              VALUES (?, ?, 'received', ?, ?)
-            `).run(
-              data.customer_id,
-              txDate,
-              -recvAmt,
-              `تسویه نقدی/کارتخوان فاکتور شماره ${invoiceNumber}`
-            );
-          }
-        } else {
-          // Unpaid or partially paid invoice: Invoice final_amount is counted as debt in invoiceDebts automatically.
-          // Therefore, we ONLY log the received payment portion (if any) as a credit in the financial ledger to avoid double counting!
-          if (recvAmt > 0) {
-            db.prepare(`
-              INSERT INTO person_financial_ledger (person_id, date, type, amount, description)
-              VALUES (?, ?, 'received', ?, ?)
-            `).run(
-              data.customer_id,
-              txDate,
-              -recvAmt,
-              `پرداخت بخشی از مبلغ فاکتور شماره ${invoiceNumber}`
-            );
-          }
-        }
-      }
-    }
-
-    // Write audit log
-    const actor = data.username || 'سیستم';
-    const actionName = data.type === 'خرید' ? 'ثبت فاکتور خرید' : 'ثبت فاکتور فروش';
-    db.prepare(`
-      INSERT INTO audit_logs (username, action, target, details, date)
-      VALUES (?, ?, ?, ?, ?)
-    `).run(actor, actionName, `فاکتور: ${invoiceNumber}`, `${actionName} به مبلغ نهایی ${data.final_amount} ثبت شد`, new Date().toISOString());
-
-    db.prepare('COMMIT').run();
-    return { success: true, id: invoiceId, invoice_number: invoiceNumber, profit: isPurchase ? 0 : totalProfit };
-  } catch (e) {
-    if (db.inTransaction) db.prepare('ROLLBACK').run();
-    console.error('Error saving invoice:', e);
-    return { success: false, error: e.message };
-  }
-});
-
-ipcMain.handle('getInvoices', () => {
-  if (!db) return [];
-  try {
-    const invoices = db.prepare(`
-      SELECT i.*, 
-        COALESCE(p.nickname, p.first_name || ' ' || p.last_name, 'مشتری عمومی (فروش سریع)') as customer_name,
-        p.phone1 as customer_phone
-      FROM invoices i
-      LEFT JOIN persons p ON i.customer_id = p.id
-      ORDER BY i.id DESC
-    `).all();
-
-    const itemsStmt = db.prepare(`
-      SELECT ii.*, p.name as product_name, p.code as product_code, p.unit as product_unit, p.type
-      FROM invoice_items ii
-      JOIN products p ON ii.product_id = p.id
-      WHERE ii.invoice_id = ?
-    `);
-
-    return invoices.map(inv => {
-      const items = itemsStmt.all(inv.id);
-      return {
-        ...inv,
-        items
-      };
-    });
-  } catch (e) {
-    console.error('Error fetching invoices:', e);
-    return [];
-  }
-});
-
-ipcMain.handle('deleteInvoice', (event, idOrData) => {
-  if (!db) throw new Error("دیتابیس متصل نیست");
-  try {
-    let id;
-    let username = null;
-    if (typeof idOrData === 'object' && idOrData !== null) {
-      id = idOrData.id;
-      username = idOrData.username;
-    } else {
-      id = idOrData;
-    }
-
-    db.prepare('BEGIN').run();
-
-    const invoice = db.prepare('SELECT type, invoice_number FROM invoices WHERE id = ?').get(id);
-    const invoiceType = invoice ? invoice.type : 'فروش';
-
-    const items = db.prepare('SELECT ii.*, i.invoice_number FROM invoice_items ii JOIN invoices i ON ii.invoice_id = i.id WHERE ii.invoice_id = ?').all(id);
     
-    const checkStockStmt = db.prepare('SELECT id FROM warehouse_stocks WHERE warehouse_id = 1 AND product_id = ?');
-    const restoreStockStmt = db.prepare('UPDATE warehouse_stocks SET quantity = quantity + ? WHERE id = ?');
-    const decreaseStockStmt = db.prepare('UPDATE warehouse_stocks SET quantity = quantity - ? WHERE id = ?');
-
-    // 'خرید' and 'برگشت از فروش' are operations that increased stock, so deleting them should decrease stock.
-    // 'فروش' and 'برگشت از خرید' are operations that decreased stock, so deleting them should increase stock.
-    const isStockIncreasingType = (invoiceType === 'خرید' || invoiceType === 'برگشت از فروش');
-
-    for (const item of items) {
-      const prod = db.prepare('SELECT type FROM products WHERE id = ?').get(item.product_id);
-      if (prod && prod.type === 'product') {
-        const qty = parseFloat(item.quantity || 1);
-        const existingStock = checkStockStmt.get(item.product_id);
-        if (existingStock) {
-          if (isStockIncreasingType) {
-            decreaseStockStmt.run(qty, existingStock.id);
-          } else {
-            restoreStockStmt.run(qty, existingStock.id);
-          }
-        }
-
-        const revType = isStockIncreasingType ? 'کاهش موجودی (لغو)' : 'افزایش موجودی (لغو)';
-        const revDesc = `اصلاح موجودی بابت حذف سند فاکتور شماره ${item.invoice_number}`;
-
-        db.prepare(`
-          INSERT INTO inventory (product_id, quantity_change, type, description, username)
-          VALUES (?, ?, ?, ?, ?)
-        `).run(item.product_id, isStockIncreasingType ? -qty : qty, revType, revDesc, username || null);
-      }
-    }
-
-    db.prepare('DELETE FROM invoice_items WHERE invoice_id = ?').run(id);
-    db.prepare('DELETE FROM invoices WHERE id = ?').run(id);
-
-    // Clean up any related financial ledger entries for this invoice
-    if (invoice && invoice.invoice_number) {
-      db.prepare("DELETE FROM person_financial_ledger WHERE description LIKE ?").run(`%${invoice.invoice_number}%`);
-    }
-
-    // Write audit log
-    const actor = username || 'سیستم';
-    const actionName = invoiceType === 'خرید' ? 'حذف فاکتور خرید' : 'حذف فاکتور فروش';
-    db.prepare(`
-      INSERT INTO audit_logs (username, action, target, details, date)
-      VALUES (?, ?, ?, ?, ?)
-    `).run(actor, actionName, `فاکتور: ${invoice ? invoice.invoice_number : `شناسه ${id}`}`, `${actionName} با شماره ${invoice ? invoice.invoice_number : `شناسه ${id}`} حذف شد`, new Date().toISOString());
-
-    db.prepare('COMMIT').run();
-    return { success: true };
-  } catch (e) {
-    if (db.inTransaction) db.prepare('ROLLBACK').run();
-    console.error('Error deleting/canceling invoice:', e);
-    return { success: false, error: e.message };
+    scanDir(dirpath);
+    return { success: true, files: results };
+  } catch (err) {
+    return { success: false, error: err.message };
   }
 });
 
-// Save Return Invoice (Sales Return & Purchase Return)
-ipcMain.handle('saveReturn', (event, data) => {
-  if (!db) throw new Error("دیتابیس متصل نیست");
+// Recursively lists all video files in a folder for general media scanning
+ipcMain.handle('scan-media-directory', async (event, dirpath) => {
   try {
-    db.prepare('BEGIN').run();
+    if (!dirpath || !fs.existsSync(dirpath)) {
+      return { success: false, error: 'Directory does not exist or invalid path' };
+    }
+    
+    const results = [];
+    const supportedExts = new Set(['.mkv', '.mp4', '.avi', '.mov', '.wmv', '.flv', '.mpeg', '.mpg', '.m4v', '.ts']);
+    
+    function scanDir(currentPath) {
+      const entries = fs.readdirSync(currentPath);
+      for (const entry of entries) {
+        const fullPath = path.join(currentPath, entry);
+        try {
+          const stat = fs.statSync(fullPath);
+          if (stat.isDirectory()) {
+            scanDir(fullPath);
+          } else {
+            const ext = path.extname(fullPath).toLowerCase();
+            if (supportedExts.has(ext)) {
+              results.push({
+                filename: entry,
+                fullPath: fullPath,
+                extension: ext.startsWith('.') ? ext.substring(1) : ext,
+                folder: currentPath,
+                size: stat.size,
+                modifiedDate: stat.mtime.toISOString()
+              });
+            }
+          }
+        } catch (e) {
+          // Ignore unreadable entries
+        }
+      }
+    }
+    
+    scanDir(dirpath);
+    return { success: true, files: results };
+  } catch (err) {
+    return { success: false, error: err.message };
+  }
+});
 
-    const { type, customer_id, invoice_id, original_invoice_num, date, items, discount, description, amountPaid, username } = data;
-    const isSalesReturn = (type === 'sales_return');
+// Converting Persian and Arabic digits to English digits
+function toEnglishDigits(str) {
+  if (!str) return '';
+  const persianDigits = [/۰/g, /۱/g, /۲/g, /۳/g, /۴/g, /۵/g, /۶/g, /۷/g, /۸/g, /۹/g];
+  const arabicDigits = [/٠/g, /١/g, /٢/g, /٣/g, /٤/g, /٥/g, /٦/g, /٧/g, /٨/g, /٩/g];
+  for (let i = 0; i < 10; i++) {
+    str = str.replace(persianDigits[i], String(i)).replace(arabicDigits[i], String(i));
+  }
+  return str;
+}
 
-    // 1. Generate return invoice number
-    const count = db.prepare("SELECT COUNT(*) as c FROM invoices WHERE type IN ('برگشت از فروش', 'برگشت از خرید')").get().c;
-    const prefix = isSalesReturn ? 'SRT' : 'PRT';
-    const invoiceNumber = `${prefix}-${new Date().toISOString().slice(2,10).replace(/-/g,'')}-${String(count + 1).padStart(4, '0')}`;
+// Meta tags retriever
+function getMetaContent(html, nameOrProperty) {
+  const metaRegex = /<meta\s+([^>]+)>/gi;
+  let match;
+  while ((match = metaRegex.exec(html)) !== null) {
+    const attrs = match[1];
+    const propertyRegex = new RegExp(`(?:property|name)\\s*=\\s*["']\\s*${nameOrProperty.replace(':', '\\:')}\\s*["']`, 'i');
+    if (propertyRegex.test(attrs)) {
+      const contentRegex = /content\s*=\s*["']([^"']+)["']/i;
+      const contentMatch = contentRegex.exec(attrs);
+      if (contentMatch) {
+         return contentMatch[1].trim();
+      }
+    }
+  }
+  return '';
+}
 
-    const totalAmount = items.reduce((sum, item) => sum + parseFloat(item.quantity || 0) * parseFloat(item.unit_price || 0), 0);
-    const finalAmount = Math.max(0, totalAmount - parseFloat(discount || 0));
+// Persian title cleanup
+function cleanPersianTitle(title) {
+  if (!title) return '';
+  let clean = title.trim();
 
-    // 2. Insert into invoices table
-    const info = db.prepare(`
-      INSERT INTO invoices (invoice_number, customer_id, total_amount, discount, tax, final_amount, status, payment_method, description, type, received_amount, date, username)
-      VALUES (?, ?, ?, ?, 0, ?, 'برگشت', 'نقدی', ?, ?, ?, ?, ?)
-    `).run(
-      invoiceNumber,
-      customer_id || null,
-      totalAmount,
-      parseFloat(discount || 0),
-      finalAmount,
-      description || '',
-      isSalesReturn ? 'برگشت از فروش' : 'برگشت از خرید',
-      parseFloat(amountPaid || 0),
-      date || new Date().toISOString(),
-      username || null
+  // Strip VOD brands
+  clean = clean.replace(/فیلیمو/g, '')
+               .replace(/نماوا/g, '')
+               .replace(/فیلم\s*نت/g, '')
+               .replace(/فیلم‌نت/g, '')
+               .replace(/filmnet/g, '')
+               .replace(/filimo/g, '')
+               .replace(/namava/g, '')
+               .replace(/imdb/gi, '')
+               .trim();
+
+  // Strip common phrases
+  clean = clean.replace(/^(?:تماشای\s+آنلاین\s+سریال|تماشای\s+آنلاین\s+فیلم|تماشای\s+آنلاین|دانلود\s+و\s+تماشای|دانلود\s+سریال|دانلود\s+فیلم|کامل|دوبله\s+فارسی|دوبله|زیرنویس\s+فارسی|تماشای|دانلود)\s+/gi, '')
+               .replace(/\s+(?:دوبله\s+فارسی|دوبله|زیرنویس|کامل|سانسور\s+شده|بدون\s+سانسور|فارسی)$/gi, '')
+               .trim();
+
+  // Strip leading words "فیلم" or "سریال" only if followed by a space
+  clean = clean.replace(/^فیلم\s+/g, '')
+               .replace(/^سریال\s+/g, '')
+               .replace(/^مجموعه\s+/g, '')
+               .trim();
+
+  // Strip common symbols
+  clean = clean.replace(/^[\s\-|:|_|–|«|»|\||(|)]+|[\s\-|:|_|–|«|»|\||(|)]+$/g, '').trim();
+
+  // Remove trailing episode info (supporting Persian/Arabic digits)
+  clean = clean.replace(/\s+قسمت\s+[\d\u06F0-\u06F9\u0660-\u0669]+.*$/gi, '')
+               .replace(/\s+فصل\s+[\d\u06F0-\u06F9\u0660-\u0669]+.*$/gi, '')
+               .trim();
+
+  // Secondary symbol cleanup
+  clean = clean.replace(/^[\s\-|:|_|–|«|»|\||(|)]+|[\s\-|:|_|–|«|»|\||(|)]+$/g, '').trim();
+
+  return clean;
+}
+
+// Summary cleanup
+function cleanSummary(summary) {
+  if (!summary) return '';
+  let clean = summary.trim();
+  
+  // Split on sentence boundary and filter out marketing lines
+  const sentences = clean.split(/[.!?]/);
+  const filtered = sentences.filter(sentence => {
+    const s = sentence.toLowerCase();
+    return !(
+      s.includes('فیلیمو') || 
+      s.includes('نماوا') || 
+      s.includes('فیلم نت') || 
+      s.includes('فیلم‌نت') || 
+      s.includes('دانلود و تماشا') ||
+      s.includes('حقوق این اثر') ||
+      s.includes('دانلود رایگان') ||
+      s.includes('لینک مستقیم')
     );
-    const returnId = info.lastInsertRowid;
+  });
+  
+  if (filtered.length > 0) {
+    clean = filtered.join('. ').trim();
+  }
+  
+  return clean.substring(0, 500);
+}
 
-    // 3. Insert items and update stock
-    const itemStmt = db.prepare(`
-      INSERT INTO invoice_items (invoice_id, product_id, quantity, unit_price, total)
-      VALUES (?, ?, ?, ?, ?)
-    `);
+// Scraping Extraction logic for Filimo, Namava, FilmNet, and IMDb
+function extractMediaInfo(html, url) {
+  let info = {
+    titleFa: '',
+    titleEn: '',
+    year: '',
+    director: '',
+    writer: '',
+    actors: '',
+    imdbRating: '',
+    poster: '',
+    summary: '',
+    genres: [],
+    duration: '',
+    country: 'ایران',
+    language: 'دوبله فارسی',
+    quality: '1080p',
+    batchSeasonsCount: 1,
+    batchEpisodesForSeason: [10]
+  };
 
-    const checkStockStmt = db.prepare('SELECT id, quantity FROM warehouse_stocks WHERE warehouse_id = 1 AND product_id = ?');
-    const addStockStmt = db.prepare('UPDATE warehouse_stocks SET quantity = quantity + ? WHERE id = ?');
-    const updateStockStmt = db.prepare('UPDATE warehouse_stocks SET quantity = quantity - ? WHERE id = ?');
-    const insertStockStmt = db.prepare('INSERT INTO warehouse_stocks (warehouse_id, product_id, quantity) VALUES (1, ?, ?)');
+  try {
+    // Recursive helper to traverse JSON-LD schema.org graph and find Movie or TVSeries
+    function findSchemasRecursive(obj, results = []) {
+      if (!obj || typeof obj !== 'object') return results;
+      if (Array.isArray(obj)) {
+        for (const item of obj) {
+          findSchemasRecursive(item, results);
+        }
+        return results;
+      }
+      if (obj['@type']) {
+        const typeStr = String(obj['@type']).toLowerCase();
+        if (typeStr.includes('movie') || typeStr.includes('tvseries') || typeStr.includes('series') || typeStr.includes('episode') || typeStr.includes('videoobject')) {
+          results.push(obj);
+        }
+      }
+      for (const key in obj) {
+        if (obj[key] && typeof obj[key] === 'object') {
+          findSchemasRecursive(obj[key], results);
+        }
+      }
+      return results;
+    }
 
-    for (const item of items) {
-      const qty = parseFloat(item.quantity || 0);
-      const price = parseFloat(item.unit_price || 0);
-      const total = qty * price;
+    // Recursive helper to traverse NextJS graph (like __NEXT_DATA__) and harvest film metadata
+    function parseImdbGraph(node) {
+      if (!node || typeof node !== 'object') return;
+      if (Array.isArray(node)) {
+        for (const item of node) parseImdbGraph(item);
+        return;
+      }
 
-      itemStmt.run(returnId, item.product_id, qty, price, total);
+      // Check titleText
+      if (node.titleText && typeof node.titleText === 'object' && node.titleText.text) {
+        const text = String(node.titleText.text).trim();
+        if (/[\u0600-\u06FF]/.test(text)) {
+          info.titleFa = text;
+        } else if (!info.titleEn) {
+          info.titleEn = text;
+        }
+      }
 
-      const prod = db.prepare('SELECT type FROM products WHERE id = ?').get(item.product_id);
+      // Check originalTitleText
+      if (node.originalTitleText && typeof node.originalTitleText === 'object' && node.originalTitleText.text) {
+        info.titleEn = String(node.originalTitleText.text).trim();
+      }
 
-      if (prod && prod.type === 'product') {
-        const existingStock = checkStockStmt.get(item.product_id);
-        if (isSalesReturn) {
-          // Sales Return: Increase stock
-          if (existingStock) {
-            addStockStmt.run(qty, existingStock.id);
-          } else {
-            insertStockStmt.run(item.product_id, qty);
+      // Check releaseYear
+      if (node.releaseYear && typeof node.releaseYear === 'object' && node.releaseYear.year) {
+        info.year = String(node.releaseYear.year);
+      }
+
+      // Check plot / plotText
+      if (node.plotText && typeof node.plotText === 'object' && node.plotText.plainText) {
+        info.summary = String(node.plotText.plainText).trim();
+      } else if (node.plot && typeof node.plot === 'object') {
+        if (node.plot.plotText && node.plot.plotText.plainText) {
+          info.summary = String(node.plot.plotText.plainText).trim();
+        }
+      }
+
+      // Check primaryImage
+      if (node.primaryImage && typeof node.primaryImage === 'object' && node.primaryImage.url) {
+        info.poster = String(node.primaryImage.url);
+      }
+
+      // Check ratingsSummary / aggregateRating
+      if (node.ratingsSummary && typeof node.ratingsSummary === 'object' && node.ratingsSummary.aggregateRating) {
+        info.imdbRating = String(node.ratingsSummary.aggregateRating);
+      } else if (node.aggregateRating) {
+        if (typeof node.aggregateRating === 'number' || typeof node.aggregateRating === 'string') {
+          info.imdbRating = String(node.aggregateRating);
+        } else if (node.aggregateRating.ratingValue) {
+          info.imdbRating = String(node.aggregateRating.ratingValue);
+        }
+      }
+
+      // Check genres
+      if (node.genres && Array.isArray(node.genres)) {
+        const found = [];
+        for (const g of node.genres) {
+          if (typeof g === 'object') {
+            if (g.text) found.push(g.text);
+            else if (g.id) found.push(g.id);
+          } else if (typeof g === 'string') {
+            found.push(g);
           }
+        }
+        if (found.length > 0) {
+          info.genres = found;
+        }
+      }
 
-          // Cardex log
-          db.prepare(`
-            INSERT INTO inventory (product_id, quantity_change, type, description, date, warehouse_id, username)
-            VALUES (?, ?, 'برگشت از فروش', ?, ?, 1, ?)
-          `).run(
-            item.product_id,
-            qty,
-            `ورود بابت برگشت از فروش شماره ${invoiceNumber}${original_invoice_num ? ` (مربوط به فاکتور فروش ${original_invoice_num})` : ''}`,
-            date || new Date().toISOString(),
-            username || null
-          );
-        } else {
-          // Purchase Return: Decrease stock
-          if (existingStock) {
-            updateStockStmt.run(qty, existingStock.id);
-          } else {
-            insertStockStmt.run(item.product_id, -qty);
-          }
+      // Check runtime
+      if (node.runtime && typeof node.runtime === 'object') {
+        if (node.runtime.seconds) {
+          info.duration = `${Math.round(node.runtime.seconds / 60)} دقیقه`;
+        } else if (node.runtime.displayableProperty && node.runtime.displayableProperty.value) {
+          info.duration = String(node.runtime.displayableProperty.value.plainText || node.runtime.displayableProperty.value);
+        }
+      }
 
-          // Cardex log
-          db.prepare(`
-            INSERT INTO inventory (product_id, quantity_change, type, description, date, warehouse_id, username)
-            VALUES (?, ?, 'برگشت از خرید', ?, ?, 1, ?)
-          `).run(
-            item.product_id,
-            -qty,
-            `خروج بابت برگشت از خرید شماره ${invoiceNumber}${original_invoice_num ? ` (مربوط به فاکتور خرید ${original_invoice_num})` : ''}`,
-            date || new Date().toISOString(),
-            username || null
-          );
+      for (const k in node) {
+        if (node[k] && typeof node[k] === 'object') {
+          parseImdbGraph(node[k]);
         }
       }
     }
 
-    // 4. Record financial ledger entries
-    if (customer_id) {
-      if (isSalesReturn) {
-        // Decrease customer's debt (credit customer, negative amount)
-        db.prepare(`
-          INSERT INTO person_financial_ledger (person_id, date, type, amount, description)
-          VALUES (?, ?, 'sales_return', ?, ?)
-        `).run(
-          customer_id,
-          date || new Date().toISOString().slice(0, 10),
-          -finalAmount,
-          `ثبت برگشت از فروش شماره ${invoiceNumber}`
-        );
+    // A. DEEP EXTRACTORS FOR HIGH-TECH PAGES (NEXT.JS, NUXT, APPLICATION STATE)
+    let nextData = null;
+    const nextDataRegex = /<script\s+[^>]*?id=["']__NEXT_DATA__["'][^>]*>([\s\S]*?)<\/script>/i;
+    const nextDataMatch = nextDataRegex.exec(html);
+    if (nextDataMatch) {
+      try {
+        nextData = JSON.parse(nextDataMatch[1].trim());
+      } catch (e) {
+        console.error("Error parsing __NEXT_DATA__ block:", e);
+      }
+    }
 
-        // If we repaid them cash/bank (amountPaid > 0), log debit as refund paid
-        if (parseFloat(amountPaid || 0) > 0) {
-          db.prepare(`
-            INSERT INTO person_financial_ledger (person_id, date, type, amount, description)
-            VALUES (?, ?, 'paid', ?, ?)
-          `).run(
-            customer_id,
-            date || new Date().toISOString().slice(0, 10),
-            parseFloat(amountPaid || 0),
-            `پرداخت نقدی/بانکی بابت برگشت از فروش شماره ${invoiceNumber}`
-          );
+    // JSON-LD processing with flexible script regex
+    const ldJsonRegex = /<script\s+[^>]*?type=["']application\/ld\+json["'][^>]*>([\s\S]*?)<\/script>/gi;
+    let ldMatch;
+    let ldDataList = [];
+    while ((ldMatch = ldJsonRegex.exec(html)) !== null) {
+      try {
+        const parsed = JSON.parse(ldMatch[1].trim());
+        if (Array.isArray(parsed)) {
+          ldDataList.push(...parsed);
+        } else {
+          ldDataList.push(parsed);
+        }
+      } catch (e) {
+        // Safe skip
+      }
+    }
+
+    // Helper to find a value by traversing a nested JSON object recursively
+    function deepSearchByKey(obj, targetKeys) {
+      let found = [];
+      const keys = targetKeys.map(k => k.toLowerCase());
+      function traverse(node) {
+        if (!node || typeof node !== 'object') return;
+        if (Array.isArray(node)) {
+          for (const item of node) traverse(item);
+          return;
+        }
+        for (const k in node) {
+          if (keys.includes(k.toLowerCase()) && node[k] && typeof node[k] !== 'object') {
+            found.push({ key: k, value: String(node[k]) });
+          }
+          traverse(node[k]);
+        }
+      }
+      traverse(obj);
+      return found;
+    }
+
+    // 1. OPEN GRAPH / META TAGS
+    const rawOgTitle = getMetaContent(html, 'og:title') || getMetaContent(html, 'twitter:title') || getMetaContent(html, 'title');
+    const titleRegex = /<title>([^<]+)<\/title>/i;
+    const titleMatch = titleRegex.exec(html);
+    const rawTitle = rawOgTitle || (titleMatch ? titleMatch[1] : '');
+    info.titleFa = cleanPersianTitle(rawTitle);
+
+    const rawOgDesc = getMetaContent(html, 'og:description') || getMetaContent(html, 'description') || getMetaContent(html, 'twitter:description');
+    info.summary = cleanSummary(rawOgDesc);
+
+    const rawOgImage = getMetaContent(html, 'og:image') || getMetaContent(html, 'twitter:image') || getMetaContent(html, 'og:image:secure_url');
+    if (rawOgImage && rawOgImage.startsWith('http')) {
+      info.poster = rawOgImage;
+    }
+
+    // 2. FILIMO HTML SPECIFIC TARGETED PARSING (BASED ON THE USER'S PROVIDED SPECS)
+    if (url.includes('filimo.com') || html.includes('filimo') || html.includes('EED6vTqjYA') || html.includes('qSmng0J2Vk')) {
+      info.country = 'ایران';
+      info.language = 'فارسی';
+
+      // A. Title extraction
+      let foundTitleFa = '';
+      const filimoTitleRegex = /<h1[^>]*class=["'][^"']*EED6vTqjYA[^"']*["'][^>]*>([^<]+)<\/h1>/i;
+      const filimoTitleMatch = filimoTitleRegex.exec(html);
+      if (filimoTitleMatch) {
+        foundTitleFa = filimoTitleMatch[1];
+      } else {
+        const titleFaDivMatch = /<div class=["']lHcvhW3BYc["']>\s*<h1[^>]*>([^<]+)<\/h1>/i.exec(html);
+        if (titleFaDivMatch) {
+          foundTitleFa = titleFaDivMatch[1];
+        } else {
+          const generalH1Match = /<h1[^>]*>([^<]+)<\/h1>/i.exec(html);
+          if (generalH1Match) {
+            foundTitleFa = generalH1Match[1];
+          }
+        }
+      }
+      if (foundTitleFa) {
+        info.titleFa = cleanPersianTitle(foundTitleFa);
+      }
+
+      // B. Metadata extraction (Seasons, Episodes, Genres, IMDb, Production Year)
+      let detailsUlHtml = '';
+      const detailsUlRegex = /<ul[^>]+data-test-id=["']details-movie-description["'][^>]*>([\s\S]*?)<\/ul>/i;
+      const detailsUlMatch = detailsUlRegex.exec(html);
+      if (detailsUlMatch) {
+        detailsUlHtml = detailsUlMatch[1];
+      }
+
+      const foundGenres = [];
+      const liMatches = [];
+
+      if (detailsUlHtml) {
+        const liItemRegex = /<li\s+([^>]*?)>([\s\S]*?)<\/li>/gi;
+        let m;
+        while ((m = liItemRegex.exec(detailsUlHtml)) !== null) {
+          liMatches.push({ attrs: m[1], content: m[2] });
         }
       } else {
-        // Decrease what we owe supplier (debit supplier, positive amount)
-        db.prepare(`
-          INSERT INTO person_financial_ledger (person_id, date, type, amount, description)
-          VALUES (?, ?, 'purchase_return', ?, ?)
-        `).run(
-          customer_id,
-          date || new Date().toISOString().slice(0, 10),
-          finalAmount,
-          `ثبت برگشت از خرید شماره ${invoiceNumber}`
-        );
+        const liItemRegex = /<li[^>]+class=["'][^"']*(?:qSmng0J2Vk|mojuf8RKKT)[^"']*["'][^>]*>([\s\S]*?)<\/li>/gi;
+        let m;
+        while ((m = liItemRegex.exec(html)) !== null) {
+          liMatches.push({ attrs: '', content: m[1] });
+        }
+      }
 
-        // If supplier repaid us cash/bank (amountPaid > 0), log credit as refund received
-        if (parseFloat(amountPaid || 0) > 0) {
-          db.prepare(`
-            INSERT INTO person_financial_ledger (person_id, date, type, amount, description)
-            VALUES (?, ?, 'received', ?, ?)
-          `).run(
-            customer_id,
-            date || new Date().toISOString().slice(0, 10),
-            -parseFloat(amountPaid || 0),
-            `دریافت نقدی/بانکی بابت برگشت از خرید شماره ${invoiceNumber}`
-          );
+      for (const item of liMatches) {
+        let ariaLabel = '';
+        const labelMatch = /aria-label=["']([^"']+)["']/i.exec(item.attrs);
+        if (labelMatch) {
+          ariaLabel = labelMatch[1].trim();
+        }
+
+        const cleanContent = item.content.replace(/<[^>]+>/g, '').trim();
+        const value = ariaLabel || cleanContent;
+
+        if (!value) continue;
+
+        // IMDb
+        if (value.includes('امتیاز') || value.includes('آی ام دی بی') || value.includes('آی‌ام‌دی‌بی') || value.toLowerCase().includes('imdb')) {
+          const ratingText = toEnglishDigits(value);
+          const scoreMatch = /([\d\.]+)/.exec(ratingText);
+          if (scoreMatch) {
+            info.imdbRating = scoreMatch[1];
+          } else if (/^\s*([\d\.]+)\s*$/.test(ratingText)) {
+            info.imdbRating = ratingText.trim();
+          }
+        }
+        // Season / Episodes
+        else if (value.includes('فصل') || value.includes('قسمت')) {
+          const enVal = toEnglishDigits(value);
+          const sAndEpMatch = /(\d+)\s*فصل\s*\(\s*(\d+)\s*قسمت\s*\)/i.exec(enVal);
+          if (sAndEpMatch) {
+            const seasons = parseInt(sAndEpMatch[1]);
+            const episodes = parseInt(sAndEpMatch[2]);
+            info.batchSeasonsCount = seasons;
+            const epPerSeason = Math.ceil(episodes / seasons);
+            info.batchEpisodesForSeason = Array(seasons).fill(epPerSeason);
+          } else {
+            const onlySeasonMatch = /(\d+)\s*فصل/i.exec(enVal);
+            if (onlySeasonMatch) {
+              const seasons = parseInt(onlySeasonMatch[1]);
+              info.batchSeasonsCount = seasons;
+              info.batchEpisodesForSeason = Array(seasons).fill(10);
+            }
+            const onlyEpMatch = /(\d+)\s*قسمت/i.exec(enVal);
+            if (onlyEpMatch && !info.batchSeasonsCount) {
+              const episodes = parseInt(onlyEpMatch[1]);
+              info.batchSeasonsCount = 1;
+              info.batchEpisodesForSeason = [episodes];
+            }
+          }
+        }
+        // Production Year & Country
+        else if (value.includes('(') && value.includes(')')) {
+          const yearMatch = /\(([\d\u06F0-\u06F9]{4})\)/.exec(value) || /\((\d{4})\)/.exec(toEnglishDigits(value));
+          if (yearMatch) {
+            info.year = toEnglishDigits(yearMatch[1]);
+          }
+          if (value.includes('ایران')) info.country = 'ایران';
+          else if (value.includes('آمریکا')) info.country = 'آمریکا';
+        }
+        // Genres
+        else {
+          const splitted = value.split(/[،,]/).map(s => s.trim()).filter(Boolean);
+          const knownGenres = ['درام', 'کمدی', 'اکشن', 'علمی تخیلی', 'ترسناک', 'هیجان انگیز', 'مستند', 'خانوادگی', 'جنایی', 'معمایی', 'عاشقانه', 'ماجراجویی', 'انیمیشن', 'تاریخی', 'جنگی', 'فانتزی', 'ورزشی', 'موزیکال', 'پلیسی'];
+          const matched = splitted.filter(s => knownGenres.some(kg => s.includes(kg) || kg.includes(s)));
+          if (matched.length > 0) {
+            foundGenres.push(...matched);
+          }
+        }
+      }
+
+      if (foundGenres.length > 0) {
+        info.genres = [...new Set(foundGenres)];
+      }
+
+      // C. Story description
+      const zbStoryMatch = /<div class=["']ZbPVax1HrE["']>([\s\S]*?)<\/div>/i.exec(html);
+      if (zbStoryMatch) {
+        info.summary = cleanSummary(zbStoryMatch[1].replace(/<[^>]+>/g, '').trim());
+      } else {
+        const altStoryMatch = /aria-labelledby=["'](?:secondStoryAbout|thirdStoryAbout)["'][^>]*>[^]*?<div[^>]*>([\s\S]*?)<\/div>/i.exec(html);
+        if (altStoryMatch) {
+          info.summary = cleanSummary(altStoryMatch[1].replace(/<[^>]+>/g, '').trim());
+        }
+      }
+
+      // D. Directors / actors from Filimo
+      const crewRegex = /<a[^>]+href=["'][^"']*\/crew\/([^"']+)["'][^>]*>([^<]+)<\/a>/gi;
+      let cMatch;
+      let directorsList = [];
+      let actorsList = [];
+      const maxDistance = 300;
+
+      while ((cMatch = crewRegex.exec(html)) !== null) {
+        const name = cMatch[2].replace(/<[^>]+>/g, '').trim();
+        const index = cMatch.index;
+        const context = html.substring(Math.max(0, index - maxDistance), Math.min(html.length, index + maxDistance));
+        if (context.includes('کارگردان') || context.includes('کارگردانی') || context.includes('کارگران')) {
+          if (!directorsList.includes(name)) directorsList.push(name);
+        } else if (context.includes('بازیگر') || context.includes('بازیگران') || context.includes('ستارگان')) {
+          if (!actorsList.includes(name)) actorsList.push(name);
+        }
+      }
+
+      if (directorsList.length > 0) info.director = directorsList.join('، ');
+      if (actorsList.length > 0) info.actors = actorsList.slice(0, 8).join('، ');
+    }
+
+    // 3. FILMNET & NAMAVA SPECIFIC PARSING RULES
+    if (url.includes('filmnet.ir') || html.includes('filmnet')) {
+      info.country = 'ایران';
+      info.language = 'فارسی';
+
+      // First H1 is title
+      const h1Match = /<h1[^>]*>([\s\S]*?)<\/h1>/i.exec(html);
+      if (h1Match) {
+        info.titleFa = cleanPersianTitle(h1Match[1].replace(/<[^>]+>/g, '').trim());
+      }
+    }
+
+    if (url.includes('namava.ir') || html.includes('namava')) {
+      info.country = 'ایران';
+      info.language = 'فارسی';
+
+      // First H1 is title
+      const h1Match = /<h1[^>]*>([\s\S]*?)<\/h1>/i.exec(html);
+      if (h1Match) {
+         info.titleFa = cleanPersianTitle(h1Match[1].replace(/<[^>]+>/g, '').trim());
+      }
+
+      // Parse namava categories
+      const namavaGenreList = [];
+      const categoryRegex = /href=["'][^"']*namava\.ir\/category\/([^"']+)["'][^>]*>([^<]+)<\/a>/gi;
+      let catMatch;
+      while ((catMatch = categoryRegex.exec(html)) !== null) {
+        const g = catMatch[2].replace(/<[^>]+>/g, '').trim();
+        if (g && g !== 'فیلم' && g !== 'سریال' && !namavaGenreList.includes(g)) {
+          namavaGenreList.push(g);
+        }
+      }
+      if (namavaGenreList.length > 0) {
+        info.genres = namavaGenreList;
+      }
+    }
+
+    // 4. NEXT.JS STATE SEARCH FALLBACK (HIGHLY RESILIENT FOR FILMNET CODES & DYNAMIC STRUCTURES)
+    if (nextData && nextData.props) {
+      const pageProps = nextData.props.pageProps || {};
+      const deepKeys = ['title', 'title_fa', 'titleFa', 'summary', 'description', 'imdbRating', 'imdb_rating', 'rating', 'released', 'release_year', 'year', 'production_year'];
+      const deepSearchResults = deepSearchByKey(nextData, deepKeys);
+
+      function getResultFor(keys) {
+        const found = deepSearchResults.find(r => keys.includes(r.key.toLowerCase()));
+        return found ? found.value : '';
+      }
+
+      const foundTitle = getResultFor(['title_fa', 'title']);
+      if (foundTitle && (!info.titleFa || ['فیلیمو', 'نماوا', 'فیلم نت', 'فیلم‌نت', ''].includes(info.titleFa))) {
+        info.titleFa = cleanPersianTitle(foundTitle);
+      }
+
+      const foundDesc = getResultFor(['summary', 'description']);
+      if (foundDesc && (!info.summary || info.summary.length < 10)) {
+        info.summary = cleanSummary(foundDesc);
+      }
+
+      const foundImdb = getResultFor(['imdbrating', 'imdb_rating', 'rating']);
+      if (foundImdb && !info.imdbRating) {
+        info.imdbRating = toEnglishDigits(foundImdb);
+      }
+
+      const foundYear = getResultFor(['release_year', 'production_year', 'year', 'released']);
+      if (foundYear && !info.year) {
+        const cleanYMatch = /(\d{4})/.exec(toEnglishDigits(foundYear));
+        if (cleanYMatch) {
+          info.year = cleanYMatch[1];
+        }
+      }
+
+      // Parse English Title deep search
+      const foundEnTitle = getResultFor(['title_en', 'titleen', 'english_title', 'englishTitle', 'slug']);
+      if (foundEnTitle && !info.titleEn) {
+        info.titleEn = foundEnTitle.replace(/-/g, ' ').toUpperCase();
+      }
+
+      // FilmNet specific state structure deep search
+      const queryMedia = pageProps.media || pageProps.movie || pageProps.series || pageProps.data || {};
+      if (queryMedia) {
+        if (queryMedia.title && !info.titleFa) info.titleFa = cleanPersianTitle(queryMedia.title);
+        if (queryMedia.english_title && !info.titleEn) info.titleEn = queryMedia.english_title.toUpperCase();
+        if (queryMedia.summary && !info.summary) info.summary = cleanSummary(queryMedia.summary);
+        if (queryMedia.production_year && !info.year) info.year = String(queryMedia.production_year);
+        if (queryMedia.imdb_rating && !info.imdbRating) info.imdbRating = String(queryMedia.imdb_rating);
+        
+        // Poster extraction from pageProps
+        const posterUrl = queryMedia.poster_image || queryMedia.poster || queryMedia.cover_image || queryMedia.cover || queryMedia.banner;
+        if (posterUrl && !info.poster) {
+          info.poster = posterUrl.startsWith('http') ? posterUrl : `https://filmnet.ir${posterUrl}`;
+        }
+
+        // Genres list
+        if (queryMedia.categories && Array.isArray(queryMedia.categories)) {
+          info.genres = queryMedia.categories.map(c => c.title || c.name || '').filter(Boolean);
+        }
+
+        // Crew parsing
+        if (queryMedia.staffs && Array.isArray(queryMedia.staffs)) {
+          const directors = queryMedia.staffs.filter(s => s.role === 'director' || s.role_name === 'director' || s.role === 'کارگردان' || s.role_name === 'کارگردان');
+          if (directors.length > 0) {
+            info.director = directors.map(d => d.name || d.string || '').filter(Boolean).join('، ');
+          }
+          const actors = queryMedia.staffs.filter(s => s.role === 'actor' || s.role_name === 'actor' || s.role === 'بازیگر' || s.role_name === 'بازیگر');
+          if (actors.length > 0) {
+            info.actors = actors.map(a => a.name || a.string || '').filter(Boolean).slice(0, 8).join('، ');
+          }
         }
       }
     }
 
-    db.prepare('COMMIT').run();
-    return { success: true, id: returnId, invoice_number: invoiceNumber };
-  } catch (e) {
-    if (db.inTransaction) db.prepare('ROLLBACK').run();
-    console.error('Error saving return invoice:', e);
-    return { success: false, error: e.message };
-  }
-});
+    // 5. SCHEMA.ORG JSON-LD FALLBACK (For generic semantic schemas - RECURSIVE DEEP MATCHING)
+    const matchingSchemas = findSchemasRecursive(ldDataList);
+    let mediaLd = matchingSchemas[0];
 
-// Debtors and Creditors Handlers
-ipcMain.handle('getDebtorsCreditorsSummary', () => {
-  if (!db) return [];
-  try {
-    const persons = db.prepare(`
-      SELECT p.*
-      FROM persons p
-      ORDER BY p.last_name ASC, p.first_name ASC
-    `).all();
-
-    const result = [];
-    for (const person of persons) {
-      // 1. Calculate Unpaid/Partial Invoices sum (sales are positive debts, purchases are negative debts)
-      const invoiceDebts = db.prepare(`
-        SELECT SUM(CASE WHEN type = 'خرید' THEN -final_amount ELSE final_amount END) as total FROM invoices 
-        WHERE customer_id = ? AND status != 'پرداخت شده'
-      `).get(person.id).total || 0;
-
-      // 2. Calculate Manual Financial Ledger sum
-      const manualBalance = db.prepare(`
-        SELECT SUM(amount) as total FROM person_financial_ledger 
-        WHERE person_id = ?
-      `).get(person.id).total || 0;
-
-      const netFinancialBalance = invoiceDebts + manualBalance;
-
-      // 3. Calculate Goods Deposit Balances and Valuation
-      const goodsBalances = db.prepare(`
-        SELECT gl.product_id, SUM(gl.quantity_change) as balance,
-          SUM(gl.quantity_change * gl.unit_price_at_transaction) as old_value,
-          prod.name as product_name, prod.price as current_price, prod.unit as product_unit
-        FROM person_goods_ledger gl
-        JOIN products prod ON gl.product_id = prod.id
-        WHERE gl.person_id = ?
-        GROUP BY gl.product_id
-        HAVING balance != 0
-      `).all(person.id);
-
-      let totalGoodsOldVal = 0;
-      let totalGoodsNewVal = 0;
-      let activeDepositsCount = 0;
-
-      for (const gb of goodsBalances) {
-        if (gb.balance > 0) {
-          totalGoodsOldVal += gb.old_value;
-          totalGoodsNewVal += gb.balance * gb.current_price;
-          activeDepositsCount += gb.balance;
+    if (mediaLd) {
+      if (mediaLd.name && (!info.titleFa || ['فیلیمو', 'نماوا', 'فیلم نت', 'فیلم‌نت', ''].includes(info.titleFa))) {
+        if (/[\u0600-\u06FF]/.test(mediaLd.name)) {
+          info.titleFa = cleanPersianTitle(mediaLd.name);
+        } else {
+          info.titleEn = mediaLd.name.trim();
         }
       }
-
-      // 4. Calculate Quotas status
-      const quotas = db.prepare(`
-        SELECT pq.*, prod.name as product_name, prod.unit as product_unit
-        FROM person_quotas pq
-        JOIN products prod ON pq.product_id = prod.id
-        WHERE pq.person_id = ?
-      `).all(person.id);
-
-      result.push({
-        ...person,
-        financial_balance: netFinancialBalance,
-        goods_balances: goodsBalances,
-        total_goods_old_val: totalGoodsOldVal,
-        total_goods_new_val: totalGoodsNewVal,
-        active_deposits_count: activeDepositsCount,
-        quotas_count: quotas.length,
-        has_active_items: activeDepositsCount > 0 || quotas.length > 0 || Math.abs(netFinancialBalance) > 100
-      });
-    }
-
-    return result;
-  } catch (e) {
-    console.error('Error fetching debtors/creditors summary:', e);
-    return [];
-  }
-});
-
-
-
-ipcMain.handle('getPersonFinancialTransactions', (event, personId) => {
-  if (!db) return [];
-  try {
-    return db.prepare(`
-      SELECT * FROM person_financial_ledger
-      WHERE person_id = ?
-      ORDER BY id DESC
-    `).all(personId);
-  } catch (e) {
-    console.error('Error fetching person financial transactions:', e);
-    return [];
-  }
-});
-
-ipcMain.handle('addPersonFinancialTransaction', (event, data) => {
-  if (!db) throw new Error("دیتابیس متصل نیست");
-  try {
-    const { person_id, date, type, amount, description } = data;
-    const info = db.prepare(`
-      INSERT INTO person_financial_ledger (person_id, date, type, amount, description)
-      VALUES (?, ?, ?, ?, ?)
-    `).run(person_id, date, type, amount, description);
-    return { success: true, id: info.lastInsertRowid };
-  } catch (e) {
-    console.error('Error adding financial transaction:', e);
-    return { success: false, error: e.message };
-  }
-});
-
-ipcMain.handle('deletePersonFinancialTransaction', (event, id) => {
-  if (!db) throw new Error("دیتابیس متصل نیست");
-  try {
-    db.prepare('DELETE FROM person_financial_ledger WHERE id = ?').run(id);
-    return { success: true };
-  } catch (e) {
-    console.error('Error deleting financial transaction:', e);
-    return { success: false, error: e.message };
-  }
-});
-
-
-
-ipcMain.handle('getPersonNotes', (event, personId) => {
-  if (!db) return [];
-  try {
-    return db.prepare(`
-      SELECT * FROM person_notes
-      WHERE person_id = ?
-      ORDER BY id DESC
-    `).all(personId);
-  } catch (e) {
-    console.error('Error fetching person notes:', e);
-    return [];
-  }
-});
-
-ipcMain.handle('addPersonNote', (event, data) => {
-  if (!db) throw new Error("دیتابیس متصل نیست");
-  try {
-    const { person_id, description, followup_date, reminder } = data;
-    const info = db.prepare(`
-      INSERT INTO person_notes (person_id, description, followup_date, reminder)
-      VALUES (?, ?, ?, ?)
-    `).run(person_id, description, followup_date, reminder);
-    return { success: true, id: info.lastInsertRowid };
-  } catch (e) {
-    console.error('Error adding person note:', e);
-    return { success: false, error: e.message };
-  }
-});
-
-ipcMain.handle('deletePersonNote', (event, id) => {
-  if (!db) throw new Error("دیتابیس متصل نیست");
-  try {
-    db.prepare('DELETE FROM person_notes WHERE id = ?').run(id);
-    return { success: true };
-  } catch (e) {
-    console.error('Error deleting person note:', e);
-    return { success: false, error: e.message };
-  }
-});
-
-// Cash and Bank APIs
-ipcMain.handle('getCashRegisters', () => {
-  if (!db) return [];
-  try {
-    return db.prepare("SELECT * FROM cash_registers ORDER BY id ASC").all();
-  } catch (e) {
-    console.error('Error in getCashRegisters:', e);
-    return [];
-  }
-});
-
-ipcMain.handle('getBankAccounts', () => {
-  if (!db) return [];
-  try {
-    return db.prepare("SELECT * FROM bank_accounts ORDER BY id ASC").all();
-  } catch (e) {
-    console.error('Error in getBankAccounts:', e);
-    return [];
-  }
-});
-
-ipcMain.handle('addCashRegister', (event, name) => {
-  if (!db) throw new Error("دیتابیس متصل نیست");
-  try {
-    const info = db.prepare("INSERT INTO cash_registers (name, balance, is_default) VALUES (?, ?, ?)").run(name, 0, 0);
-    return { success: true, id: info.lastInsertRowid };
-  } catch (e) {
-    console.error('Error in addCashRegister:', e);
-    return { success: false, error: e.message };
-  }
-});
-
-ipcMain.handle('addBankAccount', (event, data) => {
-  if (!db) throw new Error("دیتابیس متصل نیست");
-  try {
-    const { bank_name, account_number, card_number } = data;
-    const info = db.prepare("INSERT INTO bank_accounts (bank_name, account_number, card_number, balance, is_default) VALUES (?, ?, ?, ?, ?)").run(bank_name, account_number, card_number, 0, 0);
-    return { success: true, id: info.lastInsertRowid };
-  } catch (e) {
-    console.error('Error in addBankAccount:', e);
-    return { success: false, error: e.message };
-  }
-});
-
-ipcMain.handle('getTreasuryTransactions', () => {
-  if (!db) return [];
-  try {
-    return db.prepare(`
-      SELECT t.*, 
-             CASE WHEN t.source_type = 'cash' THEN c.name ELSE b.bank_name || ' - ' || b.account_number END as source_name,
-             CASE WHEN t.destination_type = 'cash' THEN dc.name 
-                  WHEN t.destination_type = 'bank' THEN dbk.bank_name || ' - ' || dbk.account_number
-                  WHEN t.destination_type = 'person' THEN p.first_name || ' ' || p.last_name
-                  ELSE NULL END as destination_name
-      FROM treasury_transactions t
-      LEFT JOIN cash_registers c ON t.source_type = 'cash' AND t.source_id = c.id
-      LEFT JOIN bank_accounts b ON t.source_type = 'bank' AND t.source_id = b.id
-      LEFT JOIN cash_registers dc ON t.destination_type = 'cash' AND t.destination_id = dc.id
-      LEFT JOIN bank_accounts dbk ON t.destination_type = 'bank' AND t.destination_id = dbk.id
-      LEFT JOIN persons p ON t.destination_type = 'person' AND t.destination_id = p.id
-      ORDER BY t.id DESC
-    `).all();
-  } catch (e) {
-    console.error('Error in getTreasuryTransactions:', e);
-    return [];
-  }
-});
-
-ipcMain.handle('addTreasuryTransaction', (event, data) => {
-  if (!db) throw new Error("دیتابیس متصل نیست");
-  
-  const { date, source_type, source_id, type, amount, destination_type, destination_id, description } = data;
-  
-  try {
-    db.prepare('BEGIN TRANSACTION').run();
-    
-    // 1. Update source balance
-    if (type === 'deposit') {
-      if (source_type === 'cash') {
-        db.prepare("UPDATE cash_registers SET balance = balance + ? WHERE id = ?").run(amount, source_id);
-      } else if (source_type === 'bank') {
-        db.prepare("UPDATE bank_accounts SET balance = balance + ? WHERE id = ?").run(amount, source_id);
+      if (mediaLd.description && !info.summary) {
+        info.summary = cleanSummary(mediaLd.description);
       }
-    } else if (type === 'withdrawal' || type === 'transfer') {
-      if (source_type === 'cash') {
-        db.prepare("UPDATE cash_registers SET balance = balance - ? WHERE id = ?").run(amount, source_id);
-      } else if (source_type === 'bank') {
-        db.prepare("UPDATE bank_accounts SET balance = balance - ? WHERE id = ?").run(amount, source_id);
+      if (mediaLd.image && !info.poster) {
+        info.poster = typeof mediaLd.image === 'string' ? mediaLd.image : (mediaLd.image.url || '');
       }
-    }
-    
-    // 2. Update destination balance if it's a transfer
-    if (type === 'transfer') {
-      if (destination_type === 'cash') {
-        db.prepare("UPDATE cash_registers SET balance = balance + ? WHERE id = ?").run(amount, destination_id);
-      } else if (destination_type === 'bank') {
-        db.prepare("UPDATE bank_accounts SET balance = balance + ? WHERE id = ?").run(amount, destination_id);
-      }
-    }
-    
-    // 3. Link to person's financial ledger if applicable
-    if (destination_type === 'person' && destination_id) {
-      let personLedgerType = type === 'deposit' ? 'received' : 'paid';
-      let personLedgerAmount = type === 'deposit' ? -amount : amount;
       
-      db.prepare(`
-        INSERT INTO person_financial_ledger (person_id, date, type, amount, description)
-        VALUES (?, ?, ?, ?, ?)
-      `).run(destination_id, date, personLedgerType, personLedgerAmount, description || (type === 'deposit' ? 'دریافت نقدی/بانکی' : 'پرداخت نقدی/بانکی'));
+      if (mediaLd.director && !info.director) {
+        const directors = Array.isArray(mediaLd.director) ? mediaLd.director : [mediaLd.director];
+        info.director = directors.map(d => d ? d.name : '').filter(Boolean).join('، ');
+      }
+      
+      if (mediaLd.actor && !info.actors) {
+        const actors = Array.isArray(mediaLd.actor) ? mediaLd.actor : [mediaLd.actor];
+        info.actors = actors.map(a => a ? a.name : '').filter(Boolean).slice(0, 8).join('، ');
+      }
+
+      if (mediaLd.genre) {
+        info.genres = Array.isArray(mediaLd.genre) ? mediaLd.genre : [mediaLd.genre];
+      }
+
+      if (!info.year) {
+        const dateField = mediaLd.datePublished || mediaLd.dateCreated || mediaLd.copyrightYear;
+        if (dateField) {
+          const yearMatch = /(\d{4})/.exec(toEnglishDigits(String(dateField)));
+          if (yearMatch) {
+            info.year = yearMatch[1];
+          }
+        }
+      }
+
+      if (mediaLd.aggregateRating && mediaLd.aggregateRating.ratingValue && !info.imdbRating) {
+        info.imdbRating = String(mediaLd.aggregateRating.ratingValue);
+      }
+
+      // Parse countryOfOrigin
+      if (mediaLd.countryOfOrigin) {
+        const countryObj = mediaLd.countryOfOrigin;
+        const countryName = typeof countryObj === 'string' ? countryObj : (countryObj.name || '');
+        if (countryName) {
+          if (countryName.toLowerCase() === 'ir' || countryName.includes('ایران') || countryName.toLowerCase() === 'iran') {
+            info.country = 'ایران';
+            info.language = 'فارسی';
+          } else {
+            info.country = countryName;
+          }
+        }
+      }
+    }
+
+    // 6. GENERAL REVERSE REGEX FALLBACKS FOR DIRECTORS/YEARS/CREDITS
+    if (!info.director) {
+      const dirLinkRegex = /href=["'][^"']*(?:director|tag\?id=director|کارگردان)[^"']*["'][^>]*>([^<]+)<\/a>/gi;
+      let dirNames = [];
+      let dLinkMatch;
+      while ((dLinkMatch = dirLinkRegex.exec(html)) !== null && dirNames.length < 3) {
+        const val = dLinkMatch[1].replace(/<[^>]+>/g, '').trim();
+        if (val && !dirNames.includes(val) && val.length > 2) dirNames.push(val);
+      }
+      if (dirNames.length > 0) info.director = dirNames.join('، ');
+    }
+
+    if (!info.actors) {
+      const actorLinkRegex = /href=["'][^"']*(?:actor|cast|character|tag\?id=actor|بازیگر)[^"']*["'][^>]*>([^<]+)<\/a>/gi;
+      let actorNames = [];
+      let aLinkMatch;
+      while ((aLinkMatch = actorLinkRegex.exec(html)) !== null && actorNames.length < 8) {
+        const val = aLinkMatch[1].replace(/<[^>]+>/g, '').trim();
+        if (val && !actorNames.includes(val) && val !== 'بازیگران' && val.length > 2) {
+          actorNames.push(val);
+        }
+      }
+      if (actorNames.length > 0) info.actors = actorNames.join('، ');
+    }
+
+    if (!info.year) {
+      const htmlWithEnDigits = toEnglishDigits(html);
+      const yearRegexPattern = /(?:سال\s*(?:ساخت|تولید|انتشار|محصول)?|product\s*year|release\s*year|copyrightYear)\s*[:|：]?\s*(13\d{2}|14\d{2}|20\d{2}|19\d{2})/i;
+      const yearMatchFromHtml = yearRegexPattern.exec(htmlWithEnDigits);
+      if (yearMatchFromHtml) {
+        info.year = yearMatchFromHtml[1];
+      }
+    }
+
+    if (!info.genres || info.genres.length === 0) {
+      const genreLinkRegex = /href=["'][^"']*(?:genre|category|ژانر)[^"']*["'][^>]*>([^<]+)<\/a>/gi;
+      let genreNames = [];
+      let gLinkMatch;
+      while ((gLinkMatch = genreLinkRegex.exec(html)) !== null && genreNames.length < 5) {
+        const val = gLinkMatch[1].replace(/<[^>]+>/g, '').trim();
+        if (val && !genreNames.includes(val) && val.length > 2 && val.length < 15 && val !== 'فیلم' && val !== 'سریال' && val !== 'برنامه') {
+          genreNames.push(val);
+        }
+      }
+      if (genreNames.length > 0) info.genres = genreNames;
+    }
+
+    // 7. SITE SPECIFIC PARSING (IMDB & SLUG OVERRIDES)
+    if (url.includes('imdb.com')) {
+      // Set defaults for IMDb - but can be overridden by parser/Gemini
+      info.country = 'آمریکا';
+      info.language = 'زیرنویس فارسی';
+
+      // Parse NextJS hydration block for IMDb recursively
+      if (nextData) {
+        parseImdbGraph(nextData);
+      }
+
+      let imdbTitle = getMetaContent(html, 'og:title') || (titleMatch ? titleMatch[1] : '');
+      if (imdbTitle) {
+        imdbTitle = imdbTitle.replace(/\s*-\s*IMDb/gi, '').replace(/\(\d{4}\)/g, '').trim();
+        if (/[\u0600-\u06FF]/.test(imdbTitle)) {
+          info.titleFa = imdbTitle;
+        } else {
+          info.titleEn = imdbTitle;
+        }
+      }
+
+      // Explicit IMDb Title Extraction from H1
+      const heroTitleRegex = /<h1[^>]*data-testid=["']hero__pageTitle["'][^>]*>([\s\S]*?)<\/h1>/i;
+      const heroTitleMatch = heroTitleRegex.exec(html);
+      if (heroTitleMatch) {
+        const cleanHeroTitle = heroTitleMatch[1].replace(/<[^>]+>/g, '').trim();
+        if (cleanHeroTitle) {
+          if (/[\u0600-\u06FF]/.test(cleanHeroTitle)) {
+            info.titleFa = cleanHeroTitle;
+          } else {
+            info.titleEn = cleanHeroTitle;
+          }
+        }
+      }
+
+      // Explicit IMDb release year
+      const imdbYearRegex = /href=["'][^"']*(?:\/title\/tt\d+\/releaseinfo|releaseinfo)[^"']*["'][^>]*>(\d{4})<\/a>/i;
+      const imdbYearMatch = imdbYearRegex.exec(html);
+      if (imdbYearMatch) {
+        info.year = imdbYearMatch[1];
+      } else {
+        const yearMatch = /\/title\/tt\d+\/(\d{4})?/i.exec(url) || /\((\d{4})\)/.exec(html);
+        if (yearMatch && !info.year) {
+          info.year = yearMatch[1];
+        }
+      }
+
+      // Explicit IMDb Rating Score
+      const ratingBarRegex = /data-testid=["']hero-rating-bar__aggregate-rating__score["'][^>]*>[^]*?<span>([\d\.]+)<\/span>/i;
+      const ratingBarMatch = ratingBarRegex.exec(html);
+      if (ratingBarMatch) {
+         info.imdbRating = ratingBarMatch[1].trim();
+      }
+
+      // Explicit IMDb Plot Summary
+      const plotXlRegex = /data-testid=["'](?:plot-xl|plot-l)["'][^>]*>([\s\S]*?)<\/span>/i;
+      const plotXlMatch = plotXlRegex.exec(html);
+      if (plotXlMatch) {
+        info.summary = plotXlMatch[1].replace(/<[^>]+>/g, '').trim();
+      }
+
+      // Explicit IMDb Poster Image
+      const posterContainerRegex = /data-testid=["']hero-media__poster["'][^>]*>[^]*?<img[^]+?src=["'](https:\/\/[^"']+)["']/i;
+      const posterContainerMatch = posterContainerRegex.exec(html);
+      if (posterContainerMatch) {
+        info.poster = posterContainerMatch[1];
+      }
+    } else {
+      if (url.includes('filimo.com')) {
+        const enTitleMatch = /"title_en"\s*:\s*"([^"]+)"/i.exec(html) || /"english_title"\s*:\s*"([^"]+)"/i.exec(html) || /english_title.*?["']([^"']+)["']/i.exec(html);
+        if (enTitleMatch) {
+          info.titleEn = enTitleMatch[1];
+        }
+      } else if (url.includes('filmnet.ir')) {
+        const enTitleMatch = /"english_title"\s*:\s*"([^"]+)"/i.exec(html) || /"englishTitle"\s*:\s*"([^"]+)"/i.exec(html) || /english_title.*?["']([^"']+)["']/i.exec(html);
+        if (enTitleMatch) {
+          info.titleEn = enTitleMatch[1];
+        }
+      } else if (url.includes('namava.ir')) {
+        const matchSlug = /namava\.ir\/(?:movie|series|play)\/\d+-([a-zA-Z0-9-]+)/i.exec(url);
+        if (matchSlug) {
+          info.titleEn = matchSlug[1].replace(/-/g, ' ').toUpperCase();
+        }
+      }
+    }
+
+    // Infer English title from URL slug if empty
+    if (!info.titleEn) {
+      const parts = url.split('/');
+      const lastPart = parts[parts.length - 1] || parts[parts.length - 2] || '';
+      const cleanSlug = lastPart.replace(/-/g, ' ').replace(/\d+/g, '').replace(/[\u0600-\u06FF]+/g, '').trim();
+      if (/^[a-zA-Z\s]+$/.test(cleanSlug) && cleanSlug.length > 3) {
+        info.titleEn = cleanSlug.toUpperCase();
+      }
+    }
+
+    // Convert genres matching English names to Persian
+    if (info.genres && info.genres.length > 0) {
+      const genreMap = {
+        'Drama': 'درام',
+        'Comedy': 'کمدی',
+        'Action': 'اکشن',
+        'Sci-Fi': 'علمی تخیلی',
+        'Horror': 'ترسناک',
+        'Thriller': 'هیجان انگیز',
+        'Documentary': 'مستند',
+        'Family': 'خانوادگی',
+        'Crime': 'جنایی',
+        'Mystery': 'معمایی',
+        'Romance': 'عاشقانه',
+        'History': 'تاریخی',
+        'Biography': 'بیوگرافی',
+        'Adventure': 'ماجراجویی',
+        'Animation': 'انیمیشن',
+        'War': 'جنگی',
+        'Western': 'وسترن',
+        'Musical': 'موزیکال',
+        'Sport': 'ورزشی',
+        'Fantasy': 'فانتزی'
+      };
+      info.genres = info.genres.map(g => genreMap[g] || g);
     }
     
-    // 4. Save the treasury transaction record
-    const info = db.prepare(`
-      INSERT INTO treasury_transactions (date, source_type, source_id, type, amount, destination_type, destination_id, description)
-      VALUES (?, ?, ?, ?, ?, ?, ?, ?)
-    `).run(date, source_type, source_id, type, amount, destination_type || null, destination_id || null, description || '');
+    // Final Polish to guarantee we NEVER return just site name as the movie name
+    if (['فیلیمو', 'نماوا', 'فیلم نت', 'فیلم‌نت', 'نام سایت', ''].includes(info.titleFa)) {
+      const altTitle = getMetaContent(html, 'twitter:text:title') || getMetaContent(html, 'og:site_name');
+      const filteredAlt = cleanPersianTitle(altTitle);
+      if (filteredAlt && !['فیلیمو', 'نماوا', 'فیلم نت', 'فیلم‌نت', ''].includes(filteredAlt)) {
+        info.titleFa = filteredAlt;
+      } else {
+        const parts = decodeURIComponent(url).split('/');
+        const lastPart = parts[parts.length - 1] || parts[parts.length - 2] || '';
+        const cleanSlug = lastPart.replace(/-/g, ' ').replace(/\d+/g, '').trim();
+        if (cleanSlug && cleanSlug.length > 2) {
+          info.titleFa = cleanSlug;
+        }
+      }
+    }
+
+    // Fill in default poster if empty
+    if (!info.poster) {
+      info.poster = `https://images.unsplash.com/photo-1536440136628-849c177e76a1?q=80&w=600&auto=format&fit=crop`;
+    }
+  } catch (err) {
+    console.error('Error parsing scraping details:', err);
+  }
+
+  return info;
+}
+
+// Request Gemini to enrich metadata based on IMDb ID to guarantee full, perfectly translated content
+async function getMetadataFromGemini(imdbId, roughTitle) {
+  const apiKey = process.env.GEMINI_API_KEY;
+  if (!apiKey) return null;
+
+  try {
+    const geminiUrl = `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key=${apiKey}`;
+    const prompt = `You are an expert movie and series metadata extractor. Extract and fetch the completed details for the movie or series with IMDb ID: "${imdbId}" (Title context: "${roughTitle}").
+You MUST return the output ONLY as a valid JSON object. Do not include any HTML markdown wrappers like \`\`\`json or explanation sentences, return pure JSON text directly. All translation fields should be written in natural, fluent Persian (Farsi) of a professional cinephile caliber.
+
+Your JSON MUST contain exactly these keys:
+{
+  "titleFa": "نام دقیق فارسی اثر یا ترجمه آن (مثل: سقوط یا شوالیه تاریکی یا ماتریکس)",
+  "titleEn": "Original English Title",
+  "summary": "یک خلاصه داستان فوق‌العاده دیدنی، پرکشش و حرفه ای به زبان فارسی بدون جملات تبلیغاتی",
+  "year": "سال ساخت میلادی به صورت یک عدد 4 رقمی انگلیسی، مثلا 2023",
+  "genres": ["نام فارسی ژانرها بدون حشو، مثلا: اکشن, درام, هیجان انگیز, جنایی"],
+  "director": "نام کارگردان یا کارگردان‌ها به فارسی (جدا شده با کامای فارسی)",
+  "writer": "نام نویسنده یا نویسنده‌ها به فارسی (جدا شده با کامای فارسی)",
+  "actors": "نام 4 الی 8 بازیگر اصلی با تفکیک کامای فارسی (مثلا: حمید فرخ نژاد، الناز ملک، عباس جمشیدی فر)",
+  "country": "نام دقیق کشور سازنده به فارسی (مثلا: ایران یا آمریکا یا فرانسه یا کره شمالی)",
+  "language": "زبان اصلی اثر به فارسی (مثلا: فارسی یا انگلیسی یا زیرنویس فارسی یا دوبله فارسی)",
+  "imdbRating": "امتیاز دقیق IMDb مانند 8.4",
+  "duration": "مدت زمان فیلم به فارسی (مثلاً 115 دقیقه) یا در صورت سریال مدت زمان تقریبی هر قسمت (مثلا هر قسمت 45 دقیقه)",
+  "category": "فیلم" (یا "سریال" - بسته به نوع این اثر),
+  "batchSeasonsCount": 1 (در صورتی که سریال است تعداد کل فصل ها به صورت عدد، در غیر اینصورت عدد 1)
+}`;
+
+    const response = await fetch(geminiUrl, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json'
+      },
+      body: JSON.stringify({
+        contents: [
+          {
+            parts: [
+              {
+                text: prompt
+              }
+            ]
+          }
+        ],
+        generationConfig: {
+          responseMimeType: "application/json"
+        }
+      })
+    });
+
+    if (!response.ok) {
+      throw new Error(`Gemini exchange failed with status ${response.status}`);
+    }
+
+    const resJson = await response.json();
+    const text = resJson.candidates[0].content.parts[0].text;
+    const cleanJsonText = text.replace(/```json/gi, '').replace(/```/g, '').trim();
+    return JSON.parse(cleanJsonText);
+  } catch (err) {
+    console.error('Gemini metadata extractor Error:', err);
+    return null;
+  }
+}
+
+ipcMain.handle('fetch-url-data', async (event, url, options = {}) => {
+  try {
+    if (!url) return { success: false, error: 'آدرس اینترنتی معتبری وارد نشده است.' };
     
-    db.prepare('COMMIT').run();
-    return { success: true, id: info.lastInsertRowid };
-  } catch (e) {
-    if (db.inTransaction) db.prepare('ROLLBACK').run();
-    console.error('Error adding treasury transaction:', e);
-    return { success: false, error: e.message };
+    // Quick validation
+    if (!url.startsWith('http://') && !url.startsWith('https://')) {
+      url = 'https://' + url;
+    }
+
+    const controller = new AbortController();
+    const timeoutVal = options && options.timeout ? options.timeout : 12000;
+    const timeoutId = setTimeout(() => controller.abort(), timeoutVal);
+
+    let response;
+    try {
+      response = await fetch(url, {
+        headers: {
+          'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+          'Accept-Language': 'fa-IR,fa;q=0.9,en-US;q=0.8,en;q=0.7',
+        },
+        signal: controller.signal
+      });
+    } finally {
+      clearTimeout(timeoutId);
+    }
+
+    if (!response.ok) {
+      throw new Error(`خطای ارتباط با سرور سایت مرجع: مرجع وضعیت ${response.status} بازگرداند.`);
+    }
+
+    // Check if it's a LAN API request from the same software (bound on port 3300 or containing api/lan)
+    if (url.includes(':3300') || url.includes('/api/lan/')) {
+      const responseText = await response.text();
+      return { success: true, data: responseText };
+    }
+
+    const html = await response.text();
+    let info = extractMediaInfo(html, url);
+
+    // AI GEMINI METADATA ENHANCEMENT OR FALLBACK
+    // If we have an IMDb url or any system that can extract an IMDb ID and GEMINI_API_KEY is configured
+    if (url.includes('imdb.com') && process.env.GEMINI_API_KEY) {
+      try {
+        const imdbIdMatch = /\/title\/(tt\d+)/i.exec(url);
+        const imdbId = imdbIdMatch ? imdbIdMatch[1] : '';
+        if (imdbId) {
+          const geminiInfo = await getMetadataFromGemini(imdbId, info.titleEn || info.titleFa || 'tt14471602');
+          if (geminiInfo) {
+            // Merge Gemini results nicely, preferring Gemini's rich translations
+            if (geminiInfo.titleFa) info.titleFa = geminiInfo.titleFa;
+            if (geminiInfo.titleEn) info.titleEn = geminiInfo.titleEn;
+            if (geminiInfo.summary) info.summary = geminiInfo.summary;
+            if (geminiInfo.year) info.year = geminiInfo.year;
+            if (geminiInfo.director) info.director = geminiInfo.director;
+            if (geminiInfo.writer) info.writer = geminiInfo.writer;
+            if (geminiInfo.actors) info.actors = geminiInfo.actors;
+            if (geminiInfo.country) info.country = geminiInfo.country;
+            if (geminiInfo.language) info.language = geminiInfo.language;
+            if (geminiInfo.imdbRating) info.imdbRating = geminiInfo.imdbRating;
+            if (geminiInfo.duration) info.duration = geminiInfo.duration;
+            if (geminiInfo.genres && geminiInfo.genres.length > 0) info.genres = geminiInfo.genres;
+            
+            // Adjust categories and series count if specified
+            if (geminiInfo.batchSeasonsCount) {
+               info.batchSeasonsCount = geminiInfo.batchSeasonsCount;
+               info.batchEpisodesForSeason = Array(geminiInfo.batchSeasonsCount).fill(10);
+            }
+          }
+        }
+      } catch (gemIniErr) {
+        console.error('Failed to enhance with Gemini metadata:', gemIniErr);
+      }
+    }
+
+    return { success: true, data: info };
+  } catch (err) {
+    console.error('Scraping handler error:', err);
+    return { success: false, error: err.message };
   }
 });
 
-ipcMain.handle('deleteTreasuryTransaction', (event, id) => {
-  if (!db) throw new Error("دیتابیس متصل نیست");
+// Download and Save poster locally in the designated folder path
+ipcMain.handle('save-poster-local', async (event, imageUrl, destFolder, filename) => {
   try {
-    db.prepare('BEGIN TRANSACTION').run();
-    
-    const tx = db.prepare("SELECT * FROM treasury_transactions WHERE id = ?").get(id);
-    if (!tx) {
-      throw new Error("تراکنش یافت نشد");
+    if (!imageUrl || !destFolder) {
+      return { success: false, error: 'آدرس تصویر یا مسیر فایل خالی است.' };
     }
-    
-    // Reverse source balance
-    if (tx.type === 'deposit') {
-      if (tx.source_type === 'cash') {
-        db.prepare("UPDATE cash_registers SET balance = balance - ? WHERE id = ?").run(tx.amount, tx.source_id);
-      } else if (tx.source_type === 'bank') {
-        db.prepare("UPDATE bank_accounts SET balance = balance - ? WHERE id = ?").run(tx.amount, tx.source_id);
-      }
-    } else if (tx.type === 'withdrawal' || tx.type === 'transfer') {
-      if (tx.source_type === 'cash') {
-        db.prepare("UPDATE cash_registers SET balance = balance + ? WHERE id = ?").run(tx.amount, tx.source_id);
-      } else if (tx.source_type === 'bank') {
-        db.prepare("UPDATE bank_accounts SET balance = balance + ? WHERE id = ?").run(tx.amount, tx.source_id);
+
+    // Clean destination directory
+    let targetDir = destFolder.trim();
+    if (fs.existsSync(targetDir)) {
+      const stats = fs.statSync(targetDir);
+      if (stats.isFile()) {
+        targetDir = path.dirname(targetDir);
       }
     }
+
+    if (!fs.existsSync(targetDir)) {
+      fs.mkdirSync(targetDir, { recursive: true });
+    }
+
+    const extension = path.extname(imageUrl.split('?')[0]) || '.jpg';
+    const finalFilename = (filename || 'poster') + extension;
+    const finalFullPath = path.join(targetDir, finalFilename);
+
+    const response = await fetch(imageUrl);
+    if (!response.ok) {
+      throw new Error(`شکست در دانلود عکس: ${response.status}`);
+    }
+
+    const arrayBuffer = await response.arrayBuffer();
+    const buffer = Buffer.from(arrayBuffer);
+
+    fs.writeFileSync(finalFullPath, buffer);
+    console.log(`Poster downloaded and saved to: ${finalFullPath}`);
+    return { success: true, savedPath: finalFullPath };
+  } catch (err) {
+    console.error('Error saving local poster:', err);
+    return { success: false, error: err.message };
+  }
+});
+
+// Desktop Widget Window launcher
+function createWidgetWindow() {
+  if (widgetWindow) {
+    widgetWindow.focus();
+    return;
+  }
+
+  let iconPath = path.join(__dirname, '../assets/icon.png');
+  if (!fs.existsSync(iconPath)) {
+    iconPath = path.join(process.resourcesPath, 'assets/icon.png');
+  }
+  if (!fs.existsSync(iconPath)) {
+    iconPath = path.join(app.getAppPath(), 'assets/icon.png');
+  }
+
+  let widgetIcon = undefined;
+  if (fs.existsSync(iconPath)) {
+    try {
+      widgetIcon = nativeImage.createFromPath(iconPath);
+    } catch (e) {
+      console.error('Failed to load widget icon via nativeImage:', e);
+    }
+  }
+
+  widgetWindow = new BrowserWindow({
+    width: 330,
+    height: 490,
+    frame: false,
+    transparent: true,
+    resizable: false,
+    alwaysOnTop: true,
+    skipTaskbar: true,
+    icon: widgetIcon,
+    webPreferences: {
+      nodeIntegration: false,
+      contextIsolation: true,
+      preload: path.join(__dirname, 'preload.cjs')
+    }
+  });
+
+  widgetWindow.setMenuBarVisibility(false);
+
+  // Position it in bottom right corner of the user's primary display
+  try {
+    const { screen } = require('electron');
+    const primaryDisplay = screen.getPrimaryDisplay();
+    const { width, height } = primaryDisplay.workAreaSize;
+    widgetWindow.setBounds({
+      x: width - 350,
+      y: height - 510,
+      width: 330,
+      height: 490
+    });
+  } catch (err) {
+    console.error('Failed to get screen boundary for widget:', err);
+  }
+
+  const isDev = process.env.NODE_ENV === 'development';
+  if (isDev) {
+    widgetWindow.loadURL('http://localhost:3000/#widget');
+  } else {
+    widgetWindow.loadURL(`file://${path.join(__dirname, '../dist/index.html')}#widget`);
+  }
+
+  widgetWindow.on('closed', () => {
+    widgetWindow = null;
+  });
+}
+
+// System Tray creator
+function createTray() {
+  ensureIconExists();
+
+  let iconPath = path.join(__dirname, '../assets/icon.png');
+  if (!fs.existsSync(iconPath)) {
+    iconPath = path.join(process.resourcesPath, 'assets/icon.png');
+  }
+  if (!fs.existsSync(iconPath)) {
+    iconPath = path.join(app.getAppPath(), 'assets/icon.png');
+  }
+
+  let trayIcon;
+  if (fs.existsSync(iconPath)) {
+    try {
+      trayIcon = nativeImage.createFromPath(iconPath);
+    } catch (e) {
+      console.error('Failed to load tray icon via nativeImage:', e);
+    }
+  } else {
+    try {
+      const base64Png = 'iVBORw0KGgoAAAANSUhEUgAAACAAAAAgCAYAAABzenr0AAAABGdBTUEAALGPC/xhBQAAACBjSFJNAAB6JgAAgIQAAPoAAACA6AAAdTAAAOpgAAA6mAAAF3CculE8AAAACXBIWXMAABYlAAAWJQFJUiTwAAAC70lEQVRYR8WWT0gUYRjGf7O77qrrurv+qa6uu6GlYZZhhgVhdBAq6NBBOnXo0Cno0Cno0ClE6NChU4fO0S09WFiEERFhdMvUNV3X3V39reuvu7M70/eNLbNuuus66M6Hh2He98fvvO/7PT+S67punmN92lVjV0Y/N4C6WpI6A0iE0D1C6F8pDoB4CI4QSkSgXpXigNgeofZIdS7FAeI+mD1CPUTYQz9W4kBiH9A9Vf88xSFSf0Y9Ctw8xSGe6YtZg8g2YXs95O8T9NlVf4LgE6n2I9sB/v2oT6g2YHsN9REoDgg+keoxYBtAn4/m76v+JMUnUnUu1F2gT666G+h/4mVA/8tTDbBGYLqO7C9BDo86DuA/o8qHsgvAnVfUQbyDehfwHj67h+3I/XgHED6mNQHwOfUHQgXgdUj8D4BvYfIP8F/Duo/mUvI/b3gY7iM4Nn8T9g8fIeA3rG2DHgU6G+F+oXMN8Hag3UDyA+gPoRxEdIpxHeRNiBeD/6NMD4GzD/COovUD8TzbyrT6R6AnQStfIUrZ7I9X5bX9pXgDoH9XmGcxS/DORC6N/AtGf080Anqf4C+Z7S2xZgYsh2KDuE6rcoPYX6Hsw0mC9A/ULx5VgnZ9k3yv5C7R/gvyv9Lco/wHypsN8K/2mNf1H+d+U/gPrUshN0BvRZw3pG7xn6W6GfF/YLa5Y9A/r0sntGP0HpHKizsPrssE8H+2zZp4f1l1Z/ZfVJgN4H43WpP0fxeRifj+ovofos9BeL9UWD9VqD9TqH9dqY9dqS9dqL9XoL0730ehp/F+rdE9brefzdg/X6Bv+WUHwT+rcG/zZQ/A7K8S3onvXF9/v1f9/Bv98P7w/m9oDZDf005mG+S7v9k6L3Yf1e56m/lGqvpNo7qfar0r1R9kFf/99Uex9pC8T8gZz6w6gHifUgp34oPkhsANgYpD6M9BBUHya/EfoQqL6k7INofUTYfUnZByH8ofUHYfdh6WGo3g/h92Hp/Sg9hNoHqfUgtB6ktv6v+gGzU+u3u4N6CgAAAABJRU5ErkJggg==';
+      trayIcon = nativeImage.createFromBuffer(Buffer.from(base64Png, 'base64'));
+    } catch (e) {
+      console.error('Failed to create nativeImage fallback for trayicon:', e);
+    }
+  }
+
+  if (trayIcon) {
+    try {
+      tray = new Tray(trayIcon);
+      const contextMenu = Menu.buildFromTemplate([
+        { 
+          label: 'نمایش برنامه اصلی', 
+          click: () => {
+            if (mainWindow) {
+              mainWindow.show();
+              mainWindow.focus();
+            }
+          } 
+        },
+        { 
+          label: 'باز کردن گجت دسکتاپ فیلم و سریال', 
+          click: () => {
+            createWidgetWindow();
+          } 
+        },
+        { type: 'separator' },
+        { 
+          label: 'خروج کامل از برنامه', 
+          click: () => {
+            app.isQuiting = true;
+            app.quit();
+          } 
+        }
+      ]);
+      
+      tray.setToolTip('مدیریت آرشیو فیلم و سریال پارس تک');
+      tray.setContextMenu(contextMenu);
+      
+      tray.on('double-click', () => {
+        if (mainWindow) {
+          mainWindow.show();
+          mainWindow.focus();
+        }
+      });
+    } catch (e) {
+      console.error('Failed to create system tray:', e);
+    }
+  } else {
+    console.warn('Tray icon could not be loaded or generated.');
+  }
+}
+
+// Widget & quit IPC handles
+ipcMain.handle('open-desktop-widget', () => {
+  createWidgetWindow();
+  return true;
+});
+
+ipcMain.handle('close-desktop-widget', () => {
+  if (widgetWindow) {
+    widgetWindow.close();
+    return true;
+  }
+  return false;
+});
+
+ipcMain.handle('show-main-window', () => {
+  if (mainWindow) {
+    mainWindow.show();
+    mainWindow.focus();
+    return true;
+  }
+  return false;
+});
+
+ipcMain.handle('quit-app', () => {
+  app.isQuiting = true;
+  app.quit();
+});
+
+// ==========================================
+// LAN SYNC & SHARE SERVICES
+// ==========================================
+const os = require('os');
+const http = require('http');
+
+let lanServer = null;
+const LAN_PORT = 3300;
+
+// Query helpers for LAN media list
+const queryAllMovies = () => {
+  return new Promise((resolve) => {
+    if (!sqliteDb) return resolve([]);
+    try {
+      const rows = sqliteDb.prepare('SELECT * FROM movies').all();
+      resolve(rows.map(r => {
+        try {
+          return {
+            ...r,
+            genres: JSON.parse(r.genres || '[]')
+          };
+        } catch(e) {
+          return r;
+        }
+      }));
+    } catch (err) {
+      resolve([]);
+    }
+  });
+};
+
+const queryAllSeries = () => {
+  return new Promise((resolve) => {
+    if (!sqliteDb) return resolve([]);
+    try {
+      const rows = sqliteDb.prepare('SELECT * FROM series').all();
+      resolve(rows.map(r => {
+        try {
+          return {
+            ...r,
+            genres: JSON.parse(r.genres || '[]'),
+            seasons: JSON.parse(r.seasons || '[]')
+          };
+        } catch(e) {
+          return r;
+        }
+      }));
+    } catch (err) {
+      resolve([]);
+    }
+  });
+};
+
+// Retrieve media catalog from DB or JSON file fallback
+const checkLanEnabledBySql = () => {
+  return new Promise((resolve) => {
+    if (!sqliteDb) {
+      try {
+        const dbPath = getDbPath();
+        if (fs.existsSync(dbPath)) {
+          const data = fs.readFileSync(dbPath, 'utf8');
+          const parsed = JSON.parse(data || '{}');
+          if (parsed.settings && parsed.settings.lanEnabled === false) {
+             return resolve(false);
+          }
+        }
+      } catch (ex) {}
+      return resolve(true);
+    }
+    try {
+      const row = sqliteDb.prepare("SELECT value FROM settings WHERE key = 'lanEnabled'").get();
+      if (!row) {
+        resolve(true);
+        return;
+      }
+      try {
+        resolve(JSON.parse(row.value) !== false);
+      } catch (e) {
+        resolve(row.value !== 'false');
+      }
+    } catch (err) {
+      resolve(true);
+    }
+  });
+};
+
+const getMediaCatalog = async () => {
+  let movies = [];
+  let series = [];
+  if (isSqliteInitialized && sqliteDb) {
+    movies = await queryAllMovies();
+    series = await queryAllSeries();
+  } else {
+    try {
+      const dbPath = getDbPath();
+      if (fs.existsSync(dbPath)) {
+        const data = fs.readFileSync(dbPath, 'utf8');
+        const parsed = JSON.parse(data || '{}');
+        movies = parsed.movies || [];
+        series = parsed.series || [];
+      }
+    } catch (err) {
+      console.error('LAN Server Error getting fallback: ', err);
+    }
+  }
+  
+  // Filter out any imported network peer movies/series so we only share true LOCAL media
+  const filteredMovies = movies.filter(m => !m.isPeerMedia && !m.originPeerIp);
+  const filteredSeries = series.filter(s => !s.isPeerMedia && !s.originPeerIp);
+  return { movies: filteredMovies, series: filteredSeries };
+};
+
+// Start LAN API Server
+function startLanServer() {
+  if (lanServer) return;
+  lanServer = http.createServer(async (req, res) => {
+    try {
+      res.setHeader('Access-Control-Allow-Origin', '*');
+      res.setHeader('Access-Control-Allow-Methods', 'GET, POST, OPTIONS');
+      res.setHeader('Access-Control-Allow-Headers', 'Content-Type');
+      
+      if (req.method === 'OPTIONS') {
+        res.writeHead(204);
+        res.end();
+        return;
+      }
+      
+      const parsedUrl = new URL(req.url, `http://${req.headers.host || 'localhost'}`);
+      const pathname = parsedUrl.pathname;
+      
+      if (pathname === '/api/lan/status') {
+        const lanActive = await checkLanEnabledBySql();
+        res.writeHead(200, { 'Content-Type': 'application/json; charset=utf-8' });
+        res.end(JSON.stringify({
+          success: true,
+          appName: 'MyMovie MediaCenter LAN Node',
+          hostname: os.hostname(),
+          time: new Date().toISOString(),
+          lanActive: lanActive
+        }));
+        return;
+      }
+      
+      if (pathname === '/api/lan/catalog') {
+        const lanActive = await checkLanEnabledBySql();
+        if (!lanActive) {
+          res.writeHead(403, { 'Content-Type': 'application/json; charset=utf-8' });
+          res.end(JSON.stringify({
+            success: false,
+            error: 'سرویس اشتراک‌گذاری شبکه محلی روی سیستم همکار خاموش (غیرفعال) است.'
+          }));
+          return;
+        }
+        const catalog = await getMediaCatalog();
+        res.writeHead(200, { 'Content-Type': 'application/json; charset=utf-8' });
+        res.end(JSON.stringify({
+          success: true,
+          movies: catalog.movies,
+          series: catalog.series
+        }));
+        return;
+      }
+      
+      if (pathname === '/api/lan/poster') {
+        const lanActive = await checkLanEnabledBySql();
+        if (!lanActive) {
+          res.writeHead(403, { 'Content-Type': 'text/plain; charset=utf-8' });
+          res.end('سرویس اشتراک‌گذاری در شبکه محلی غیرفعال است.');
+          return;
+        }
+        const imgPath = parsedUrl.searchParams.get('path');
+        if (!imgPath || !fs.existsSync(imgPath)) {
+          res.writeHead(404, { 'Content-Type': 'text/plain; charset=utf-8' });
+          res.end('تصویر یافت نشد.');
+          return;
+        }
+        const ext = path.extname(imgPath).toLowerCase();
+        let contentType = 'image/jpeg';
+        if (ext === '.png') contentType = 'image/png';
+        else if (ext === '.webp') contentType = 'image/webp';
+        
+        try {
+          const stat = fs.statSync(imgPath);
+          res.writeHead(200, {
+            'Content-Type': contentType,
+            'Content-Length': stat.size
+          });
+          const stream = fs.createReadStream(imgPath);
+          stream.pipe(res);
+        } catch (e) {
+          res.writeHead(500, { 'Content-Type': 'text/plain' });
+          res.end('Error serving image: ' + e.message);
+        }
+        return;
+      }
+      
+      if (pathname === '/api/lan/download') {
+        const lanActive = await checkLanEnabledBySql();
+        if (!lanActive) {
+          res.writeHead(403, { 'Content-Type': 'text/plain; charset=utf-8' });
+          res.end('سرویس اشتراک‌گذاری در شبکه محلی غیرفعال است.');
+          return;
+        }
+        const filePath = parsedUrl.searchParams.get('path');
+        if (!filePath || !fs.existsSync(filePath)) {
+          res.writeHead(404, { 'Content-Type': 'text/plain; charset=utf-8' });
+          res.end('فایل مورد نظر یافت نشد.');
+          return;
+        }
+        
+        const stat = fs.statSync(filePath);
+        res.writeHead(200, {
+          'Content-Type': 'application/octet-stream',
+          'Content-Length': stat.size,
+          'Content-Disposition': `attachment; filename="${encodeURIComponent(path.basename(filePath))}"`
+        });
+        
+        const stream = fs.createReadStream(filePath);
+        stream.pipe(res);
+        return;
+      }
+      
+      res.writeHead(404, { 'Content-Type': 'text/plain' });
+      res.end('Not Found');
+    } catch (err) {
+      console.error('LAN Server Error:', err);
+      res.writeHead(500, { 'Content-Type': 'text/plain' });
+      res.end('Internal Server Error: ' + err.message);
+    }
+  });
+
+  lanServer.on('error', (e) => {
+    console.error('LAN Server Listen Error:', e);
+  });
+
+  lanServer.listen(LAN_PORT, '0.0.0.0', () => {
+    console.log(`LAN Server running on port ${LAN_PORT}`);
+  });
+}
+
+// IPC handles for IP retrieval
+ipcMain.handle('get-local-ips', async () => {
+  try {
+    const interfaces = os.networkInterfaces();
+    const ips = [];
+    for (const interfaceName in interfaces) {
+      const iface = interfaces[interfaceName];
+      for (const entry of iface) {
+        if (entry.family === 'IPv4' && !entry.internal) {
+          ips.push(entry.address);
+        }
+      }
+    }
+    return ips;
+  } catch (err) {
+    return [];
+  }
+});
+
+// IPC handle for Downloading/Copying LAN Files
+ipcMain.handle('download-lan-file', async (event, url, destPath) => {
+  return new Promise((resolve) => {
+    const httpLib = url.startsWith('https') ? require('https') : require('http');
     
-    // Reverse destination balance if transfer
-    if (tx.type === 'transfer') {
-      if (tx.destination_type === 'cash') {
-        db.prepare("UPDATE cash_registers SET balance = balance - ? WHERE id = ?").run(tx.amount, tx.destination_id);
-      } else if (tx.destination_type === 'bank') {
-        db.prepare("UPDATE bank_accounts SET balance = balance - ? WHERE id = ?").run(tx.amount, tx.destination_id);
+    const destDir = path.dirname(destPath);
+    if (!fs.existsSync(destDir)) {
+      try {
+        fs.mkdirSync(destDir, { recursive: true });
+      } catch (e) {
+        return resolve({ success: false, error: 'خطا در ایجاد پوشه مقصد: ' + e.message });
       }
     }
     
-    // Reverse person's financial ledger if applicable
-    if (tx.destination_type === 'person' && tx.destination_id) {
-      let personLedgerAmount = tx.type === 'deposit' ? -tx.amount : tx.amount;
-      db.prepare(`
-        DELETE FROM person_financial_ledger 
-        WHERE person_id = ? AND date = ? AND amount = ?
-      `).run(tx.destination_id, tx.date, personLedgerAmount);
+    const writeStream = fs.createWriteStream(destPath);
+    
+    let totalBytes = 0;
+    let bytesWritten = 0;
+    let startTime = Date.now();
+    let lastProgressTime = Date.now();
+    let bytesInInterval = 0;
+    
+    const request = httpLib.get(url, (response) => {
+      if (response.statusCode !== 200) {
+        writeStream.close();
+        try { fs.unlinkSync(destPath); } catch (e) {}
+        return resolve({ success: false, error: `کد خطای سرور: ${response.statusCode}` });
+      }
+      
+      totalBytes = parseInt(response.headers['content-length'] || '0', 10);
+      
+      response.on('data', (chunk) => {
+        bytesWritten += chunk.length;
+        bytesInInterval += chunk.length;
+        
+        const now = Date.now();
+        if (now - lastProgressTime > 250) {
+          const timeElapsedSec = (now - startTime) / 1000;
+          const totalSpeedMBs = timeElapsedSec > 0 ? (bytesWritten / (1024 * 1024)) / timeElapsedSec : 0;
+          const intervalSpeedMBs = (bytesInInterval / (1024 * 1024)) / ((now - lastProgressTime) / 1000);
+          
+          if (mainWindow && !mainWindow.isDestroyed()) {
+            mainWindow.webContents.send('download-progress', {
+              progress: totalBytes > 0 ? Math.round((bytesWritten / totalBytes) * 100) : 0,
+              bytesWritten,
+              totalBytes,
+              speedMbs: totalSpeedMBs,
+              currentSpeedMbs: intervalSpeedMBs,
+              timeElapsed: timeElapsedSec
+            });
+          }
+          
+          lastProgressTime = now;
+          bytesInInterval = 0;
+        }
+      });
+      
+      response.pipe(writeStream);
+      
+      writeStream.on('finish', () => {
+        writeStream.close();
+        if (mainWindow && !mainWindow.isDestroyed()) {
+          mainWindow.webContents.send('download-progress', {
+            progress: 100,
+            bytesWritten,
+            totalBytes,
+            speedMbs: totalBytes > 0 ? (bytesWritten / (1024 * 1024)) / ((Date.now() - startTime) / 1000) : 0,
+            currentSpeedMbs: 0,
+            timeElapsed: (Date.now() - startTime) / 1000,
+            completed: true
+          });
+        }
+        resolve({ success: true });
+      });
+    });
+    
+    request.on('error', (err) => {
+      writeStream.close();
+      if (fs.existsSync(destPath)) {
+        try { fs.unlinkSync(destPath); } catch(ex) {}
+      }
+      resolve({ success: false, error: err.message });
+    });
+    
+    writeStream.on('error', (err) => {
+      request.destroy();
+      writeStream.close();
+      if (fs.existsSync(destPath)) {
+        try { fs.unlinkSync(destPath); } catch(ex) {}
+      }
+      resolve({ success: false, error: err.message });
+    });
+  });
+});
+
+// IPC handle for Copying Media File to USB Flash/HDD Drive with real progress
+ipcMain.handle('copy-file-to-usb', async (event, { sourcePath, destDir, id }) => {
+  return new Promise((resolve) => {
+    try {
+      if (!sourcePath || !fs.existsSync(sourcePath)) {
+        return resolve({ success: false, error: 'فایل منبع روی هارد دیسک یافت نشد. لطفاً مسیر فایل را بررسی کنید.' });
+      }
+
+      const stat = fs.statSync(sourcePath);
+      if (stat.isDirectory()) {
+        return resolve({ success: false, error: 'مسیر انتخاب شده یک پوشه است، کپی مستقیم فایل الزامی است.' });
+      }
+
+      if (!fs.existsSync(destDir)) {
+        try {
+          fs.mkdirSync(destDir, { recursive: true });
+        } catch (e) {
+          return resolve({ success: false, error: 'خطا در ایجاد پوشه مقصد روی فلش: ' + e.message });
+        }
+      }
+
+      const filename = path.basename(sourcePath);
+      const destPath = path.join(destDir, filename);
+
+      const readStream = fs.createReadStream(sourcePath);
+      const writeStream = fs.createWriteStream(destPath);
+
+      const totalBytes = stat.size;
+      let bytesCopied = 0;
+      let startTime = Date.now();
+      let lastProgressTime = Date.now();
+      let bytesInInterval = 0;
+
+      readStream.on('data', (chunk) => {
+        bytesCopied += chunk.length;
+        bytesInInterval += chunk.length;
+
+        const now = Date.now();
+        if (now - lastProgressTime > 200) {
+          const timeElapsedSec = (now - startTime) / 1000;
+          const speedMbs = timeElapsedSec > 0 ? (bytesCopied / (1024 * 1024)) / timeElapsedSec : 0;
+
+          if (mainWindow && !mainWindow.isDestroyed()) {
+            mainWindow.webContents.send('copy-progress', {
+              id,
+              progress: totalBytes > 0 ? Math.round((bytesCopied / totalBytes) * 100) : 0,
+              bytesCopied,
+              totalBytes,
+              speedMbs,
+              completed: false
+            });
+          }
+
+          lastProgressTime = now;
+          bytesInInterval = 0;
+        }
+      });
+
+      readStream.pipe(writeStream);
+
+      writeStream.on('finish', () => {
+        writeStream.close();
+        if (mainWindow && !mainWindow.isDestroyed()) {
+          mainWindow.webContents.send('copy-progress', {
+            id,
+            progress: 100,
+            bytesCopied,
+            totalBytes,
+            speedMbs: totalBytes > 0 ? (bytesCopied / (1024 * 1024)) / ((Date.now() - startTime) / 1000) : 0,
+            completed: true
+          });
+        }
+        resolve({ success: true, destPath });
+      });
+
+      readStream.on('error', (err) => {
+        writeStream.close();
+        if (fs.existsSync(destPath)) {
+          try { fs.unlinkSync(destPath); } catch (ex) {}
+        }
+        resolve({ success: false, error: 'خطا در خواندن فایل منبع: ' + err.message });
+      });
+
+      writeStream.on('error', (err) => {
+        readStream.destroy();
+        writeStream.close();
+        if (fs.existsSync(destPath)) {
+          try { fs.unlinkSync(destPath); } catch (ex) {}
+        }
+        resolve({ success: false, error: 'خطا در نوشتن روی فلش دیسک: ' + err.message });
+      });
+
+    } catch (err) {
+      resolve({ success: false, error: 'خطای سیستمی کپی فایل: ' + err.message });
     }
-    
-    // Delete transaction
-    db.prepare("DELETE FROM treasury_transactions WHERE id = ?").run(id);
-    
-    db.prepare('COMMIT').run();
-    return { success: true };
-  } catch (e) {
-    if (db.inTransaction) db.prepare('ROLLBACK').run();
-    console.error('Error deleting treasury transaction:', e);
-    return { success: false, error: e.message };
+  });
+});
+
+app.whenReady().then(() => {
+  initSqlite();
+  createWindow();
+  createTray();
+  
+  try {
+    startLanServer();
+  } catch (err) {
+    console.error('Failed to start LAN sharing server:', err);
+  }
+
+  app.on('activate', () => {
+    if (BrowserWindow.getAllWindows().length === 0) {
+      createWindow();
+    }
+  });
+});
+
+app.on('window-all-closed', () => {
+  if (process.platform !== 'darwin') {
+    app.quit();
   }
 });
