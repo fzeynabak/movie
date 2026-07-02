@@ -29,6 +29,10 @@ contextBridge.exposeInMainWorld('electronAPI', {
   getLocalIps: () => ipcRenderer.invoke('get-local-ips'),
   downloadLanFile: (url, destPath) => ipcRenderer.invoke('download-lan-file', url, destPath),
   copyFileToUsb: (sourcePath, destDir, id) => ipcRenderer.invoke('copy-file-to-usb', { sourcePath, destDir, id }),
+  findMatchingSubtitles: (videoPath) => ipcRenderer.invoke('find-matching-subtitles', videoPath),
+  readTextFile: (filepath) => ipcRenderer.invoke('read-text-file', filepath),
+  exportSqliteDb: (destPath) => ipcRenderer.invoke('export-sqlite-db', destPath),
+  importSqliteDb: (srcPath) => ipcRenderer.invoke('import-sqlite-db', srcPath),
   onCopyProgress: (callback) => {
     ipcRenderer.removeAllListeners('copy-progress');
     ipcRenderer.on('copy-progress', (event, data) => callback(data));

@@ -1,24 +1,25 @@
 {
-  "name": "react-example",
+  "name": "movie-parstech",
   "private": true,
   "version": "0.0.0",
   "type": "module",
   "main": "electron/main.cjs",
   "scripts": {
-    "dev": "vite --port=3000 --host=0.0.0.0",
-    "start": "concurrently -k \"npm run dev\" \"wait-on http://localhost:3000 && cross-env NODE_ENV=development electron .\"",
+    "dev": "vite --port=3050 --host=0.0.0.0 --strictPort",
+    "start": "concurrently -k \"npm run dev\" \"wait-on http://localhost:3050 && cross-env NODE_ENV=development electron .\"",
     "electron:prod": "npm run build && cross-env NODE_ENV=production electron .",
     "build": "vite build",
     "preview": "vite preview",
     "clean": "rm -rf dist server.js",
     "lint": "tsc --noEmit",
-    "rebuild": "electron-rebuild -f -w better-sqlite3",
-    "postinstall": "npm run rebuild",
+    "rebuild": "electron-builder install-app-deps",
+    "rebuild:native": "electron-rebuild -f -w better-sqlite3",
+    "postinstall": "electron-builder install-app-deps",
     "package": "npm run build && electron-builder --win"
   },
   "build": {
     "appId": "com.movieapp.app",
-    "productName": "MovieSeriesApp",
+    "productName": "MovieParsTech",
     "asar": true,
     "asarUnpack": [
       "**/node_modules/sqlite3/**/*",

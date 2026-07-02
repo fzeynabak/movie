@@ -13,7 +13,6 @@ import { MediaScanner, ScannedMediaItem } from '../utils/MediaScanner';
 import { SettingsService } from '../utils/SettingsService';
 import { TMDbService } from '../utils/TMDbService';
 import { ScanPreviewModal } from '../components/ScanPreviewModal';
-import OfflineImageManager from '../components/OfflineImageManager';
 import { 
   Tv, 
   Plus, 
@@ -40,97 +39,8 @@ import {
   Download,
   Globe,
   Maximize2,
-  Network,
-  Image,
-  Loader2
+  Network
 } from 'lucide-react';
-
-const genreMap: Record<string, string> = {
-  // English -> Persian
-  'drama': 'درام',
-  'comedy': 'کمدی',
-  'action': 'اکشن',
-  'science fiction': 'علمی تخیلی',
-  'sci-fi': 'علمی تخیلی',
-  'horror': 'ترسناک',
-  'thriller': 'هیجان انگیز',
-  'documentary': 'مستند',
-  'family': 'خانوادگی',
-  'crime': 'جنایی',
-  'mystery': 'معمایی',
-  'romance': 'عاشقانه',
-  'history': 'تاریخی',
-  'biography': 'بیوگرافی',
-  'adventure': 'ماجراجویی',
-  'animation': 'انیمیشن',
-  'war': 'جنگی',
-  'music': 'موزیکال',
-  'musical': 'موزیکال',
-  'western': 'وسترن',
-  'fantasy': 'فانتزی',
-  'tv movie': 'برنامه تلویزیونی',
-  'tv show': 'برنامه تلویزیونی',
-  'short': 'فیلم کوتاه',
-  'social': 'اجتماعی',
-  'sport': 'ورزشی',
-  'sports': 'ورزشی',
-
-  // Persian exact/loose mapping -> standard
-  'درام': 'درام',
-  'کمدی': 'کمدی',
-  'اکشن': 'اکشن',
-  'علمی تخیلی': 'علمی تخیلی',
-  'علمی-تخیلی': 'علمی تخیلی',
-  'ترسناک': 'ترسناک',
-  'هیجان انگیز': 'هیجان انگیز',
-  'هیجان‌انگیز': 'هیجان انگیز',
-  'مستند': 'مستند',
-  'خانوادگی': 'خانوادگی',
-  'جنایی': 'جنایی',
-  'معمایی': 'معمایی',
-  'عاشقانه': 'عاشقانه',
-  'تاریخی': 'تاریخی',
-  'بیوگرافی': 'بیوگرافی',
-  'ماجراجویی': 'ماجراجویی',
-  'انیمیشن': 'انیمیشن',
-  'جنگی': 'جنگی',
-  'موزیکال': 'موزیکال',
-  'وسترن': 'وسترن',
-  'فانتزی': 'فانتزی',
-  'ورزشی': 'ورزشی',
-  'اجتماعی': 'اجتماعی',
-  'فیلم کوتاه': 'فیلم کوتاه',
-  'برنامه تلویزیونی': 'برنامه تلویزیونی',
-  'برنامهٔ تلویزیونی': 'برنامه تلویزیونی',
-  'فیلم تلویزیونی': 'برنامه تلویزیونی',
-};
-
-const mapTmdbGenresToLocal = (tmdbGenres: string[]): string[] => {
-  if (!Array.isArray(tmdbGenres)) return [];
-  const mapped = new Set<string>();
-  tmdbGenres.forEach(g => {
-    const clean = g.trim().toLowerCase();
-    if (genreMap[clean]) {
-      mapped.add(genreMap[clean]);
-    } else {
-      const matchedKey = Object.keys(genreMap).find(key => clean.includes(key) || key.includes(clean));
-      if (matchedKey) {
-        mapped.add(genreMap[matchedKey]);
-      }
-    }
-  });
-  return Array.from(mapped);
-};
-
-const getCleanEnglishName = (titleEn: string, titleFa: string): string => {
-  let name = titleEn ? titleEn : titleFa;
-  return name
-    .toLowerCase()
-    .replace(/[^a-z0-9]/g, ' ')
-    .trim()
-    .replace(/\s+/g, '-')
-    || 'media';
-};
 
 interface SeriesProps {
   onAddToCart?: (item: any) => void;
@@ -201,8 +111,6 @@ export default function SeriesPage({
   const [formFilePath, setFormFilePath] = useState('');
   const [formOfficialSite, setFormOfficialSite] = useState('');
   const [formGallery, setFormGallery] = useState('');
-  const [onlineImageOptions, setOnlineImageOptions] = useState<{ url: string; type: 'poster' | 'gallery'; selected: boolean; }[]>([]);
-  const [isSaving, setIsSaving] = useState(false);
   const [formReleaseDay, setFormReleaseDay] = useState('');
   const [formReleaseTime, setFormReleaseTime] = useState('');
   const [formTotalEpisodes, setFormTotalEpisodes] = useState<number>(0);
@@ -211,6 +119,7 @@ export default function SeriesPage({
   const [formIsEnded, setFormIsEnded] = useState<boolean>(false);
   const [formIsEndedText, setFormIsEndedText] = useState<string>('پایان سریال');
   const [selectedGalleryImage, setSelectedGalleryImage] = useState<string | null>(null);
+  const [galleryZoomScale, setGalleryZoomScale] = useState(1);
   const [importText, setImportText] = useState('');
   const [formSeasons, setFormSeasons] = useState<Season[]>([]);
 
@@ -219,6 +128,21 @@ export default function SeriesPage({
   const [tmdbSearchId, setTmdbSearchId] = useState('');
   const [tmdbResults, setTmdbResults] = useState<any[]>([]);
   const [isSearchingTmdb, setIsSearchingTmdb] = useState(false);
+
+  // TMDb Image Selection Modal State
+  const [showImagePickerModal, setShowImagePickerModal] = useState(false);
+  const [fetchedImages, setFetchedImages] = useState<{
+    poster: string;
+    backdrop: string;
+    gallery: string[];
+  }>({ poster: '', backdrop: '', gallery: [] });
+  const [selectedImagesToDownload, setSelectedImagesToDownload] = useState<{
+    poster: boolean;
+    backdrop: boolean;
+    gallery: boolean[];
+  }>({ poster: true, backdrop: true, gallery: [] });
+  const [downloadDestFolder, setDownloadDestFolder] = useState('');
+  const [isDownloadingImages, setIsDownloadingImages] = useState(false);
 
   const extractTmdbIdAndType = (input: string, defaultType: 'movie' | 'tv'): { id: number; type: 'movie' | 'tv' } | null => {
     const trimmed = input.trim();
@@ -243,6 +167,88 @@ export default function SeriesPage({
     return null;
   };
 
+  const downloadSelectedImages = async () => {
+    if (!downloadDestFolder.trim()) {
+      showToast('لطفاً پوشه مقصد برای ذخیره‌سازی تصاویر را انتخاب کنید.', 'error');
+      return;
+    }
+    
+    setIsDownloadingImages(true);
+    showToast('در حال دریافت و ذخیره تصاویر انتخابی در پوشه سریال...');
+    
+    try {
+      if (window.electronAPI && window.electronAPI.savePosterLocal) {
+        const isWindows = downloadDestFolder.includes('\\');
+        const picFolder = downloadDestFolder.trim() + (isWindows ? '\\pic' : '/pic');
+        
+        let posterLocalPath = '';
+        if (selectedImagesToDownload.poster && fetchedImages.poster) {
+          const res = await window.electronAPI.savePosterLocal(fetchedImages.poster, picFolder, 'poster');
+          if (res && res.success) {
+            posterLocalPath = res.savedPath;
+            setFormPoster(res.savedPath);
+          } else {
+            console.error('Failed to download poster:', res?.error);
+          }
+        }
+        
+        let backdropLocalPath = '';
+        if (selectedImagesToDownload.backdrop && fetchedImages.backdrop) {
+          const res = await window.electronAPI.savePosterLocal(fetchedImages.backdrop, picFolder, 'backdrop');
+          if (res && res.success) {
+            backdropLocalPath = res.savedPath;
+          } else {
+            console.error('Failed to download backdrop:', res?.error);
+          }
+        }
+
+        const localGallery: string[] = [];
+        if (backdropLocalPath) {
+          localGallery.push(backdropLocalPath);
+        }
+        
+        for (let i = 0; i < fetchedImages.gallery.length; i++) {
+          if (selectedImagesToDownload.gallery[i]) {
+            const imgUrl = fetchedImages.gallery[i];
+            const res = await window.electronAPI.savePosterLocal(imgUrl, picFolder, `gallery_${i + 1}`);
+            if (res && res.success) {
+              localGallery.push(res.savedPath);
+            }
+          }
+        }
+
+        if (localGallery.length > 0) {
+          setFormGallery(localGallery.join(','));
+        }
+        
+        showToast('تمام تصاویر انتخابی با موفقیت ذخیره و به فرم متصل شدند.');
+        setShowImagePickerModal(false);
+      } else {
+        // Fallback for online preview
+        if (selectedImagesToDownload.poster) {
+          setFormPoster(fetchedImages.poster);
+        }
+        const galleryUrls: string[] = [];
+        if (selectedImagesToDownload.backdrop && fetchedImages.backdrop) {
+          galleryUrls.push(fetchedImages.backdrop);
+        }
+        fetchedImages.gallery.forEach((url, idx) => {
+          if (selectedImagesToDownload.gallery[idx]) {
+            galleryUrls.push(url);
+          }
+        });
+        setFormGallery(galleryUrls.join(','));
+        showToast('تصاویر انتخابی (آدرس‌های اینترنتی) به فیلدهای مربوطه متصل شدند.');
+        setShowImagePickerModal(false);
+      }
+    } catch (err: any) {
+      console.error('Error downloading selected images:', err);
+      showToast('خطا در دانلود تصاویر: ' + err.message, 'error');
+    } finally {
+      setIsDownloadingImages(false);
+    }
+  };
+
   const populateFormWithTmdb = async (metadata: any) => {
     if (!metadata) return;
     setFormTitleFa(metadata.title || '');
@@ -254,36 +260,133 @@ export default function SeriesPage({
     setFormCountry(metadata.countries ? metadata.countries.join(', ') : 'خارجی');
     setFormLanguage(formCategory.includes('ایرانی') ? 'فارسی' : 'زبان اصلی (زیرنویس فارسی)');
     setFormImdbRating(metadata.rating ? metadata.rating.toFixed(1) : '0.0');
-    
-    // Auto-select genres with robust mapping!
-    const mappedGenres = mapTmdbGenresToLocal(metadata.genres || []);
-    setFormGenres(mappedGenres);
-    
+
+    // Translate and normalize genres to map to POPULAR_GENRES
+    const genreTranslations: Record<string, string> = {
+      'drama': 'درام',
+      'comedy': 'کمدی',
+      'action': 'اکشن',
+      'science fiction': 'علمی تخیلی',
+      'sci-fi': 'علمی تخیلی',
+      'horror': 'ترسناک',
+      'thriller': 'هیجان انگیز',
+      'documentary': 'مستند',
+      'family': 'خانوادگی',
+      'crime': 'جنایی',
+      'mystery': 'معمایی',
+      'romance': 'عاشقانه',
+      'history': 'تاریخی',
+      'biography': 'بیوگرافی',
+      'adventure': 'ماجراجویی',
+      'animation': 'انیمیشن',
+      'war': 'جنگی',
+      'music': 'موزیکال',
+      'musical': 'موزیکال',
+      'western': 'وسترن',
+      'fantasy': 'فانتزی',
+      'tv movie': 'برنامه تلویزیونی',
+      'tv show': 'برنامه تلویزیونی',
+      'soap': 'اجتماعی',
+      'talk': 'برنامه تلویزیونی',
+      'news': 'مستند',
+      'reality': 'برنامه تلویزیونی',
+      'kids': 'انیمیشن',
+      'action & adventure': 'اکشن',
+      'sci-fi & fantasy': 'علمی تخیلی'
+    };
+
+    const normalizeGenre = (g: string): string => {
+      if (!g) return '';
+      return g.trim()
+        .toLowerCase()
+        .replace(/‌/g, ' ') // replace ZWNJ with space
+        .replace(/-/g, ' ') // replace dash with space
+        .replace(/\s+/g, ' '); // normalize spaces
+    };
+
+    const mappedGenres: string[] = [];
+    const incomingGenres = metadata.genres || [];
+    incomingGenres.forEach((g: string) => {
+      const norm = normalizeGenre(g);
+      // 1. Direct translation
+      if (genreTranslations[norm]) {
+        mappedGenres.push(genreTranslations[norm]);
+        return;
+      }
+      // 2. See if there is a matches in POPULAR_GENRES
+      const match = POPULAR_GENRES.find(pg => normalizeGenre(pg) === norm);
+      if (match) {
+        mappedGenres.push(match);
+      } else {
+        // Check if any POPULAR_GENRES string contains or is contained in the norm
+        const containingMatch = POPULAR_GENRES.find(pg => {
+          const pNorm = normalizeGenre(pg);
+          return pNorm.includes(norm) || norm.includes(pNorm);
+        });
+        if (containingMatch) {
+          mappedGenres.push(containingMatch);
+        }
+      }
+    });
+    setFormGenres(Array.from(new Set(mappedGenres)));
+
+    // Auto-populate seasons and episodes if metadata.tvSeasons is available
+    if (metadata.tvSeasons && metadata.tvSeasons.length > 0) {
+      const generatedSeasons: Season[] = metadata.tvSeasons.map((s: any) => {
+        const seasonId = `season_${s.seasonNumber}_${Date.now()}_${Math.random().toString(36).substr(2, 5)}`;
+        
+        // Generate episodes list automatically
+        const episodes: Episode[] = [];
+        for (let i = 1; i <= s.episodeCount; i++) {
+          episodes.push({
+            id: `ep_${s.seasonNumber}_${i}_${Date.now()}_${Math.random().toString(36).substr(2, 5)}`,
+            episodeNumber: i,
+            name: `قسمت ${i}`,
+            videoPath: '',
+            description: `فصل ${s.seasonNumber} قسمت ${i}`
+          });
+        }
+
+        return {
+          id: seasonId,
+          name: s.name ? s.name.replace(/Season/gi, 'فصل') : `فصل ${s.seasonNumber}`,
+          episodes: episodes
+        };
+      });
+      setFormSeasons(generatedSeasons);
+      
+      // Calculate and set total episodes count
+      const totalEpisodes = metadata.tvSeasons.reduce((acc: number, cur: any) => acc + (cur.episodeCount || 0), 0);
+      setFormTotalEpisodes(totalEpisodes);
+      setFormMyEpisodesCount(0); // initially 0
+      setFormReleasedEpisodesCount(totalEpisodes);
+    }
+
     setFormSummary(metadata.overview || '');
     setFormOfficialSite(`https://www.themoviedb.org/tv/${metadata.id}`);
 
-    // Populate online image choices for interactive gallery selection!
-    const options: { url: string; type: 'poster' | 'gallery'; selected: boolean; }[] = [];
-    if (metadata.posterPath) {
-      options.push({ url: metadata.posterPath, type: 'poster', selected: true });
+    // Pre-populate destination folder from file path if possible
+    let defaultDest = '';
+    if (formFilePath) {
+      defaultDest = formFilePath;
     }
-    if (metadata.gallery && metadata.gallery.length > 0) {
-      metadata.gallery.forEach((url: string) => {
-        options.push({ url, type: 'gallery', selected: true });
-      });
-    } else if (metadata.backdropPath) {
-      options.push({ url: metadata.backdropPath, type: 'gallery', selected: true });
-    }
-    setOnlineImageOptions(options);
+    setDownloadDestFolder(defaultDest);
 
-    setFormPoster(metadata.posterPath || '');
-    if (metadata.gallery && metadata.gallery.length > 0) {
-      setFormGallery(metadata.gallery.slice(0, 5).join(', '));
-    } else {
-      setFormGallery(metadata.backdropPath || '');
-    }
+    // Load available images to select from
+    const galleryImages = metadata.gallery || [];
+    setFetchedImages({
+      poster: metadata.posterPath || '',
+      backdrop: metadata.backdropPath || '',
+      gallery: galleryImages
+    });
+    setSelectedImagesToDownload({
+      poster: !!metadata.posterPath,
+      backdrop: !!metadata.backdropPath,
+      gallery: galleryImages.map(() => true)
+    });
 
-    showToast('اطلاعات سریال از TMDb با موفقیت اعمال شد. می‌توانید تصاویر گالری را تیک بزنید.');
+    showToast('مشخصات متنی سریال دریافت شد. لطفاً تصاویر مورد نیاز را تایید و ذخیره کنید.');
+    setShowImagePickerModal(true);
   };
 
   const handleSearchTmdb = async () => {
@@ -604,7 +707,6 @@ export default function SeriesPage({
   const [detailSeries, setDetailSeries] = useState<Series | null>(null);
   const [zoomedPoster, setZoomedPoster] = useState<string | null>(null);
   const [activeSeasonId, setActiveSeasonId] = useState<string | null>(null); // active season ID being managed
-  const [isOfflineImgOpen, setIsOfflineImgOpen] = useState(false);
   const [editingSeasonId, setEditingSeasonId] = useState<string | null>(null);
   const [editingSeasonName, setEditingSeasonName] = useState('');
   const [seasonFormName, setSeasonFormName] = useState('');
@@ -650,6 +752,35 @@ export default function SeriesPage({
       }
     }
   }, [initialSelectedId, seriesList]);
+
+  useEffect(() => {
+    if (!selectedGalleryImage) return;
+
+    const handleKeyDown = (e: KeyboardEvent) => {
+      const galleryList = detailSeries?.gallery || [];
+      const currentIdx = galleryList.indexOf(selectedGalleryImage);
+
+      if (e.key === 'ArrowRight' || e.key === 'ArrowUp') {
+        if (currentIdx < galleryList.length - 1) {
+          setSelectedGalleryImage(galleryList[currentIdx + 1]);
+          setGalleryZoomScale(1);
+        }
+      } else if (e.key === 'ArrowLeft' || e.key === 'ArrowDown') {
+        if (currentIdx > 0) {
+          setSelectedGalleryImage(galleryList[currentIdx - 1]);
+          setGalleryZoomScale(1);
+        }
+      } else if (e.key === 'Escape') {
+        setSelectedGalleryImage(null);
+        setGalleryZoomScale(1);
+      }
+    };
+
+    window.addEventListener('keydown', handleKeyDown);
+    return () => {
+      window.removeEventListener('keydown', handleKeyDown);
+    };
+  }, [selectedGalleryImage, detailSeries]);
 
   // Auto path suggestions for new episodes
   useEffect(() => {
@@ -713,22 +844,6 @@ export default function SeriesPage({
     setFormIsEndedText(series.isEndedText || 'پایان سریال');
     setFormSeasons(series.seasons || []);
     setImportText('');
-    setIsSaving(false);
-
-    // Initialize options with existing online image URLs if editing
-    const opts: { url: string; type: 'poster' | 'gallery'; selected: boolean; }[] = [];
-    if (series.poster && series.poster.startsWith('http')) {
-      opts.push({ url: series.poster, type: 'poster', selected: true });
-    }
-    if (series.gallery && series.gallery.length > 0) {
-      series.gallery.forEach((url: string) => {
-        if (url.startsWith('http')) {
-          opts.push({ url, type: 'gallery', selected: true });
-        }
-      });
-    }
-    setOnlineImageOptions(opts);
-
     setShowFormModal(true);
   };
 
@@ -763,8 +878,6 @@ export default function SeriesPage({
     setFormIsEndedText('پایان سریال');
     setFormSeasons([]);
     setImportText('');
-    setOnlineImageOptions([]);
-    setIsSaving(false);
     setShowFormModal(true);
   };
 
@@ -832,11 +945,20 @@ export default function SeriesPage({
     }
   };
 
-  const handlePlayFile = async (filePath: string, originPeerIp?: string) => {
+  const handlePlayFile = async (filePath: string, originPeerIp?: string, customTitle?: string, subtitlesList?: string[]) => {
     if (!filePath) {
       showAlert('مسیری برای این رسانه ثبت نشده است. ابتدا اطلاعات را ویرایش کرده و آدرس فایل را وارد نمایید.', 'warning');
       return;
     }
+    const settings = dbService.getSettings();
+    if (settings.videoPlayerMode === 'internal') {
+      const event = new CustomEvent('play_video_internal', {
+        detail: { filePath, title: customTitle || 'پخش ویدیو', originPeerIp, subtitlesList }
+      });
+      window.dispatchEvent(event);
+      return;
+    }
+
     if (window.electronAPI) {
       try {
         const res = await window.electronAPI.playVideoFile(filePath, originPeerIp);
@@ -874,7 +996,7 @@ export default function SeriesPage({
     const path = episode.videoPath && episode.videoPath.trim() !== '' && episode.videoPath !== 'D:\\Media\\Series\\Video.mkv'
       ? episode.videoPath
       : (series.filePath || '');
-    handlePlayFile(path, series.originPeerIp);
+    handlePlayFile(path, series.originPeerIp, `${series.titleFa} - ${episode.name}`, episode.subtitlesList);
   };
 
   const handleOpenEpisodeFolder = (episode: Episode, series: Series) => {
@@ -895,7 +1017,7 @@ export default function SeriesPage({
     }
   };
 
-  const handleSaveSeries = async (e: React.FormEvent) => {
+  const handleSaveSeries = (e: React.FormEvent) => {
     e.preventDefault();
     if (!formTitleFa || !formTitleEn) {
       alert('وارد کردن نام فارسی و انگلیسی اجباری است.');
@@ -916,60 +1038,6 @@ export default function SeriesPage({
       return;
     }
 
-    setIsSaving(true);
-    let finalPoster = formPoster;
-    let finalGalleryStr = formGallery;
-
-    if (formFilePath && onlineImageOptions.length > 0) {
-      const selectedToDownload = onlineImageOptions.filter(opt => opt.selected && opt.url.startsWith('http'));
-      if (selectedToDownload.length > 0) {
-        try {
-          const isWindows = formFilePath.includes('\\');
-          const lastSlash = Math.max(formFilePath.lastIndexOf('/'), formFilePath.lastIndexOf('\\'));
-          let baseDir = '';
-          if (lastSlash !== -1) {
-            baseDir = formFilePath.substring(0, lastSlash);
-          } else {
-            baseDir = formFilePath;
-          }
-          
-          const picFolder = baseDir + (isWindows ? '\\pic' : '/pic');
-          const cleanEngName = getCleanEnglishName(formTitleEn, formTitleFa);
-          
-          let galleryCounter = 1;
-          const localGalleryPaths: string[] = [];
-
-          for (const opt of selectedToDownload) {
-            if (opt.type === 'poster') {
-              const res = await window.electronAPI.savePosterLocal(opt.url, picFolder, `${cleanEngName}-poster`);
-              if (res && res.success && res.savedPath) {
-                finalPoster = res.savedPath;
-              }
-            } else {
-              const filename = `${cleanEngName}-g-${String(galleryCounter++).padStart(2, '0')}`;
-              const res = await window.electronAPI.savePosterLocal(opt.url, picFolder, filename);
-              if (res && res.success && res.savedPath) {
-                localGalleryPaths.push(res.savedPath);
-              }
-            }
-          }
-
-          // Keep existing non-http items if any
-          const existingNonHttp = formGallery
-            .split(',')
-            .map(s => s.trim())
-            .filter(s => s && !s.startsWith('http'));
-          
-          const allGalleryItems = [...existingNonHttp, ...localGalleryPaths];
-          if (allGalleryItems.length > 0) {
-            finalGalleryStr = allGalleryItems.join(', ');
-          }
-        } catch (err) {
-          console.error('Error downloading images in form save:', err);
-        }
-      }
-    }
-
     const settings = dbService.getSettings();
     const payload = {
       category: formCategory,
@@ -986,11 +1054,11 @@ export default function SeriesPage({
       quality: formQuality,
       subtitle: formSubtitle,
       genres: formGenres,
-      poster: finalPoster,
+      poster: formPoster,
       summary: formSummary,
       filePath: formFilePath,
       officialSite: formOfficialSite,
-      gallery: finalGalleryStr ? finalGalleryStr.split(',').map(s => s.trim()).filter(Boolean) : [],
+      gallery: formGallery ? formGallery.split(',').map(s => s.trim()).filter(Boolean) : [],
       releaseDay: formReleaseDay || undefined,
       releaseTime: formReleaseTime || undefined,
       totalEpisodes: Number(formTotalEpisodes || 0),
@@ -1009,7 +1077,6 @@ export default function SeriesPage({
       dbService.addSeries(payload);
     }
 
-    setIsSaving(false);
     setShowFormModal(false);
     refreshData();
   };
@@ -2659,103 +2726,20 @@ export default function SeriesPage({
                 />
               </div>
 
-              {/* Interactive Online Images Manager */}
-              {onlineImageOptions && onlineImageOptions.length > 0 && (
-                <div className="space-y-2 pt-2 p-3 bg-indigo-50/50 dark:bg-slate-800/40 border border-indigo-150 dark:border-slate-700/50 rounded-xl" id="series-online-images-manager">
-                  <div className="flex items-center justify-between">
-                    <div className="flex items-center gap-1.5">
-                      <Sparkles className="w-4 h-4 text-emerald-500" />
-                      <span className="text-[11px] font-bold text-gray-800 dark:text-gray-200">
-                        انتخاب و تیک‌زدن تصاویر آنلاین جهت دانلود محلی و خودکار (در فولدر سریال)
-                      </span>
-                    </div>
-                    <button
-                      type="button"
-                      onClick={() => {
-                        const allSelected = onlineImageOptions.every(o => o.selected);
-                        setOnlineImageOptions(onlineImageOptions.map(o => ({ ...o, selected: !allSelected })));
-                      }}
-                      className="text-[9px] font-bold text-indigo-600 hover:text-indigo-700 dark:text-indigo-400 dark:hover:text-indigo-300"
-                    >
-                      {onlineImageOptions.every(o => o.selected) ? 'عدم انتخاب همه' : 'انتخاب همه'}
-                    </button>
-                  </div>
-                  
-                  {!formFilePath && (
-                    <p className="text-[9.5px] text-amber-600 dark:text-amber-400 font-medium leading-relaxed">
-                      ⚠️ توجه: برای دانلود تصاویر و ذخیره خودکار در پوشه سریال، لطفاً ابتدا فیلد «مسیر فیزیکی فایل» را تکمیل نمایید. در غیر این صورت، آدرس‌های آنلاین ذخیره خواهند شد.
-                    </p>
-                  )}
-
-                  <div className="grid grid-cols-2 sm:grid-cols-4 md:grid-cols-5 gap-2 pt-1 max-h-[190px] overflow-y-auto">
-                    {onlineImageOptions.map((opt, idx) => {
-                      return (
-                        <div
-                          key={idx}
-                          onClick={() => {
-                            setOnlineImageOptions(onlineImageOptions.map((o, i) => i === idx ? { ...o, selected: !o.selected } : o));
-                          }}
-                          className={`relative rounded-lg overflow-hidden border-2 cursor-pointer transition-all select-none group h-24 ${
-                            opt.selected
-                              ? 'border-emerald-500 shadow-sm shadow-emerald-500/10'
-                              : 'border-transparent hover:border-gray-300 dark:hover:border-slate-600'
-                          }`}
-                        >
-                          <img
-                            src={opt.url}
-                            alt="انتخاب تصویر"
-                            className="w-full h-full object-cover group-hover:scale-105 transition-transform"
-                            referrerPolicy="no-referrer"
-                          />
-                          
-                          {/* Type badge */}
-                          <span className={`absolute top-1 left-1 px-1 py-0.5 text-[8px] font-bold rounded text-white ${
-                            opt.type === 'poster' ? 'bg-indigo-600' : 'bg-amber-600'
-                          }`}>
-                            {opt.type === 'poster' ? 'پوستر' : 'گالری'}
-                          </span>
-
-                          {/* Checkbox overlay */}
-                          <div className={`absolute bottom-1 right-1 w-4 h-4 rounded flex items-center justify-center border ${
-                            opt.selected 
-                              ? 'bg-emerald-500 border-emerald-500 text-white' 
-                              : 'bg-black/40 border-white/60 text-transparent'
-                          }`}>
-                            <Check className="w-3 h-3 stroke-[3]" />
-                          </div>
-                        </div>
-                      );
-                    })}
-                  </div>
-                </div>
-              )}
-
               {/* Footer */}
               <div className="pt-3 border-t border-gray-150 dark:border-gray-800 flex justify-end gap-3.5">
                 <button
                   type="button"
                   onClick={() => setShowFormModal(false)}
                   className="px-4 py-2 border border-gray-200 dark:border-gray-700 rounded-lg text-xs font-semibold hover:bg-gray-100 dark:hover:bg-slate-800 cursor-pointer"
-                  disabled={isSaving}
                 >
                   انصراف
                 </button>
                 <button
                   type="submit"
-                  className="flex items-center gap-1.5 px-6 py-2 bg-sky-600 hover:bg-sky-500 disabled:bg-sky-400 text-white rounded-lg text-xs font-bold cursor-pointer transition-all"
-                  disabled={isSaving}
+                  className="px-6 py-2 bg-sky-600 hover:bg-sky-500 text-white rounded-lg text-xs font-bold cursor-pointer"
                 >
-                  {isSaving ? (
-                    <>
-                      <Loader2 className="w-4 h-4 animate-spin" />
-                      <span>در حال دریافت و ذخیره تصاویر...</span>
-                    </>
-                  ) : (
-                    <>
-                      <Check className="w-4 h-4" />
-                      <span>ثبت اطلاعات سریال</span>
-                    </>
-                  )}
+                  ثبت اطلاعات سریال
                 </button>
               </div>
             </form>
@@ -2931,14 +2915,6 @@ export default function SeriesPage({
                     id="btn-series-detail-export"
                   >
                     <Download className="w-4 h-4 text-[#38bdf8]" />
-                  </button>
-                  <button
-                    onClick={() => { setIsOfflineImgOpen(true); }}
-                    className="p-2.5 bg-gray-100 hover:bg-gray-200 dark:bg-gray-800 dark:hover:bg-slate-700 text-gray-700 dark:text-gray-200 rounded-lg cursor-pointer flex items-center justify-center"
-                    title="دانلود و مدیریت آفلاین تصاویر 🖼️"
-                    id="btn-series-detail-offline-images"
-                  >
-                    <Image className="w-4 h-4 text-emerald-500" />
                   </button>
                 </div>
               </div>
@@ -3853,52 +3829,154 @@ export default function SeriesPage({
       )}
 
       {/* SCREENSHOT GALLERY LIGHTBOX MODAL */}
-      {selectedGalleryImage && (
-        <div 
-          onClick={() => setSelectedGalleryImage(null)} 
-          className="fixed inset-0 z-[120] bg-black/90 flex items-center justify-center p-4 cursor-zoom-out animate-fadeIn"
-          id="gallery-lightbox-modal"
-        >
-          <img 
-            src={getSafePosterUrl(selectedGalleryImage)} 
-            alt="تصویر بزرگ‌‌شده صحنه" 
-            className="max-h-[92vh] max-w-full rounded-xl shadow-2xl animate-scaleIn border border-slate-800 bg-slate-950" 
-            referrerPolicy="no-referrer"
-          />
-          <button 
-            onClick={() => setSelectedGalleryImage(null)}
-            className="absolute top-4 left-4 p-2 bg-black/60 text-white rounded-full hover:bg-black/90 transition-all border border-slate-700"
-          >
-            <X className="w-5 h-5" />
-          </button>
-        </div>
-      )}
-
-      {/* OFFLINE IMAGE MANAGER MODAL */}
-      <OfflineImageManager
-        isOpen={isOfflineImgOpen}
-        onClose={() => setIsOfflineImgOpen(false)}
-        mediaId={detailSeries?.id || ''}
-        mediaType="series"
-        mediaTitle={detailSeries?.titleFa || ''}
-        collectionName={detailSeries?.collectionName || ''}
-        initialPoster={detailSeries?.poster || ''}
-        initialGallery={detailSeries?.gallery || []}
-        filePath={detailSeries?.filePath || ''}
-        onImagesSaved={(newPoster, newGallery) => {
-          if (!detailSeries) return;
-          const updatedSeries = dbService.updateSeries(detailSeries.id, {
-            poster: newPoster,
-            gallery: newGallery
-          });
-          if (updatedSeries) {
-            setDetailSeries(updatedSeries);
-            // Refresh series state
-            refreshData();
-            showToast('تصاویر با موفقیت دانلود و بر روی دیتابیس محلی ذخیره شدند.', 'success');
+      {selectedGalleryImage && (() => {
+        const galleryList = detailSeries?.gallery || [];
+        const currentIdx = galleryList.indexOf(selectedGalleryImage);
+        
+        const goNext = (e: React.MouseEvent) => {
+          e.stopPropagation();
+          if (currentIdx < galleryList.length - 1) {
+            setSelectedGalleryImage(galleryList[currentIdx + 1]);
+            setGalleryZoomScale(1);
           }
-        }}
-      />
+        };
+
+        const goPrev = (e: React.MouseEvent) => {
+          e.stopPropagation();
+          if (currentIdx > 0) {
+            setSelectedGalleryImage(galleryList[currentIdx - 1]);
+            setGalleryZoomScale(1);
+          }
+        };
+
+        const zoomIn = (e: React.MouseEvent) => {
+          e.stopPropagation();
+          setGalleryZoomScale(prev => Math.min(prev + 0.25, 3));
+        };
+
+        const zoomOut = (e: React.MouseEvent) => {
+          e.stopPropagation();
+          setGalleryZoomScale(prev => Math.max(prev - 0.25, 1));
+        };
+
+        const resetZoom = (e: React.MouseEvent) => {
+          e.stopPropagation();
+          setGalleryZoomScale(1);
+        };
+
+        return (
+          <div 
+            onClick={() => { setSelectedGalleryImage(null); setGalleryZoomScale(1); }} 
+            className="fixed inset-0 z-[120] bg-black/95 flex flex-col items-center justify-between p-4 animate-fadeIn select-none"
+            id="gallery-lightbox-modal"
+          >
+            {/* Header controls inside lightbox */}
+            <div className="w-full flex items-center justify-between text-white p-2 z-10 bg-black/40 backdrop-blur rounded-lg max-w-4xl border border-slate-800" onClick={(e) => e.stopPropagation()}>
+              <div className="flex items-center gap-3">
+                <button 
+                  onClick={() => { setSelectedGalleryImage(null); setGalleryZoomScale(1); }}
+                  className="p-1.5 hover:bg-slate-800 text-gray-300 hover:text-white rounded-full transition-all cursor-pointer border-none bg-transparent"
+                  title="بستن"
+                >
+                  <X className="w-5 h-5" />
+                </button>
+                <span className="text-[11px] font-bold text-gray-300">
+                  تصویر {toPersianNums(currentIdx + 1)} از {toPersianNums(galleryList.length)}
+                </span>
+              </div>
+
+              {/* Zoom Buttons */}
+              <div className="flex items-center gap-1.5">
+                <button 
+                  onClick={zoomOut}
+                  className="px-2.5 py-1 text-[11px] font-bold bg-slate-800 hover:bg-slate-700 text-white rounded cursor-pointer transition-all border-none"
+                  title="کوچک‌نمایی"
+                >
+                  زوم -
+                </button>
+                <span className="text-[11px] font-mono w-10 text-center font-bold text-indigo-400">
+                  {Math.round(galleryZoomScale * 100)}%
+                </span>
+                <button 
+                  onClick={zoomIn}
+                  className="px-2.5 py-1 text-[11px] font-bold bg-slate-800 hover:bg-slate-700 text-white rounded cursor-pointer transition-all border-none"
+                  title="بزرگ‌نمایی"
+                >
+                  زوم +
+                </button>
+                {galleryZoomScale !== 1 && (
+                  <button 
+                    onClick={resetZoom}
+                    className="px-2 py-1 text-[10px] bg-indigo-600 hover:bg-indigo-500 text-white rounded cursor-pointer transition-all border-none"
+                  >
+                    ۱۰۰٪
+                  </button>
+                )}
+              </div>
+            </div>
+
+            {/* Main Stage with navigation buttons */}
+            <div className="flex-1 w-full max-w-5xl flex items-center justify-between relative gap-4 my-2 overflow-hidden">
+              {/* Prev Button (left arrow) */}
+              <button 
+                onClick={goPrev}
+                disabled={currentIdx === 0}
+                className="p-3 bg-black/60 hover:bg-black/80 text-white rounded-full transition-all border border-slate-800 disabled:opacity-20 disabled:cursor-not-allowed shrink-0 z-10 cursor-pointer"
+                title="قبلی"
+              >
+                <ChevronLeft className="w-6 h-6" />
+              </button>
+
+              {/* Image Container with Zoom support */}
+              <div className="flex-1 h-full flex items-center justify-center overflow-auto cursor-grab active:cursor-grabbing p-4" onClick={(e) => e.stopPropagation()}>
+                <img 
+                  src={getSafePosterUrl(selectedGalleryImage)} 
+                  alt="نمای بزرگ صحنه" 
+                  className="max-h-[70vh] max-w-full rounded-lg shadow-2xl transition-transform duration-200"
+                  style={{ transform: `scale(${galleryZoomScale})` }}
+                  referrerPolicy="no-referrer"
+                />
+              </div>
+
+              {/* Next Button (right arrow) */}
+              <button 
+                onClick={goNext}
+                disabled={currentIdx === galleryList.length - 1}
+                className="p-3 bg-black/60 hover:bg-black/80 text-white rounded-full transition-all border border-slate-800 disabled:opacity-20 disabled:cursor-not-allowed shrink-0 z-10 cursor-pointer"
+                title="بعدی"
+              >
+                <ChevronRight className="w-6 h-6" />
+              </button>
+            </div>
+
+            {/* Thumbnails Underneath list */}
+            {galleryList.length > 0 && (
+              <div className="w-full max-w-4xl bg-black/55 backdrop-blur border border-slate-800 p-2.5 rounded-xl flex gap-2.5 overflow-x-auto justify-center z-10" onClick={(e) => e.stopPropagation()}>
+                {galleryList.map((imgUrl, idx) => {
+                  const isActive = imgUrl === selectedGalleryImage;
+                  return (
+                    <img 
+                      key={idx}
+                      src={getSafePosterUrl(imgUrl)}
+                      alt=""
+                      className={`w-16 h-10 object-cover rounded border cursor-pointer transition-all shrink-0 ${
+                        isActive 
+                          ? 'border-indigo-500 scale-110 shadow-lg shadow-indigo-505/25 ring-2 ring-indigo-500/20' 
+                          : 'border-slate-800 hover:border-slate-500 hover:scale-105 opacity-60 hover:opacity-100'
+                      }`}
+                      onClick={() => {
+                        setSelectedGalleryImage(imgUrl);
+                        setGalleryZoomScale(1);
+                      }}
+                      referrerPolicy="no-referrer"
+                    />
+                  );
+                })}
+              </div>
+            )}
+          </div>
+        );
+      })()}
 
       {/* SCAN PREVIEW MODAL */}
       <ScanPreviewModal
@@ -3909,6 +3987,219 @@ export default function SeriesPage({
         defaultCategory={selectedCategory === 'همه' ? 'خارجی' : selectedCategory}
         onImportComplete={refreshData}
       />
+
+      {/* TMDb Image Downloader & Picker Modal */}
+      {showImagePickerModal && (
+        <div className="fixed inset-0 bg-black/65 backdrop-blur-sm z-[9999] flex items-center justify-center p-4 overflow-y-auto" dir="rtl">
+          <div className="bg-white dark:bg-slate-900 border border-gray-150 dark:border-slate-800 rounded-2xl w-full max-w-4xl shadow-2xl overflow-hidden flex flex-col my-8 animate-in fade-in zoom-in-95 duration-200">
+            {/* Header */}
+            <div className="px-6 py-4 bg-indigo-50 dark:bg-slate-950/40 border-b border-gray-150 dark:border-slate-800 flex items-center justify-between">
+              <div className="flex items-center gap-2.5 text-indigo-600 dark:text-indigo-400">
+                <Sparkles className="w-5 h-5 text-amber-500 animate-bounce" />
+                <h3 className="text-sm font-bold text-gray-800 dark:text-gray-100">مدیریت و دانلود هوشمند گالری تصاویر سریال TMDb</h3>
+              </div>
+              <button 
+                type="button"
+                onClick={() => setShowImagePickerModal(false)}
+                className="p-1.5 hover:bg-gray-150 dark:hover:bg-slate-800 rounded-lg text-gray-400 hover:text-gray-600 dark:hover:text-gray-200 transition-all cursor-pointer border-none bg-transparent"
+              >
+                <X className="w-4 h-4" />
+              </button>
+            </div>
+
+            {/* Content */}
+            <div className="p-6 overflow-y-auto max-h-[65vh] space-y-6">
+              {/* Path Picker */}
+              <div className="p-4 bg-gray-50 dark:bg-slate-950/25 rounded-xl border border-gray-100 dark:border-slate-850 space-y-2">
+                <label className="text-xs font-bold text-gray-600 dark:text-gray-300 block">پوشه مقصد برای دانلود و ذخیره تصاویر در هارد دیسک:</label>
+                <div className="flex gap-2">
+                  <input
+                    type="text"
+                    value={downloadDestFolder}
+                    onChange={(e) => setDownloadDestFolder(e.target.value)}
+                    className="flex-1 h-10 px-3 bg-white dark:bg-slate-950 rounded-lg text-xs border border-gray-200 dark:border-gray-800 text-gray-800 dark:text-gray-200 focus:outline-none focus:border-indigo-500"
+                    placeholder="یک پوشه در سیستم خود انتخاب کنید (مثلا: D:\Media\Series\Shahrzad)"
+                  />
+                  <button
+                    type="button"
+                    onClick={() => {
+                      if (window.electronAPI && window.electronAPI.selectDirectory) {
+                        window.electronAPI.selectDirectory().then((dir: string) => {
+                          if (dir) setDownloadDestFolder(dir);
+                        }).catch((err: any) => console.error(err));
+                      } else {
+                        showToast('انتخاب پوشه فقط در برنامه دسکتاپ فعال است. در وب آدرس‌ها متصل می‌شوند.', 'info');
+                      }
+                    }}
+                    className="h-10 px-4 bg-indigo-50 hover:bg-indigo-100 dark:bg-slate-800 dark:hover:bg-slate-750 text-indigo-600 dark:text-indigo-300 rounded-lg text-xs font-bold transition-all cursor-pointer flex items-center gap-1.5 shrink-0 border-none"
+                  >
+                    <FolderOpen className="w-4 h-4" />
+                    <span>انتخاب پوشه...</span>
+                  </button>
+                </div>
+                <p className="text-[10px] text-gray-400 leading-relaxed">
+                  نکته: تصاویر دانلود شده به‌طور خودکار در زیرپوشه‌ای به نام <code className="font-mono bg-gray-200 dark:bg-slate-800 px-1 py-0.5 rounded text-indigo-600 dark:text-indigo-400">pic</code> داخل پوشه مقصد فوق ذخیره خواهند شد.
+                </p>
+              </div>
+
+              {/* Grid of Images to choose */}
+              <div className="space-y-3">
+                <span className="text-xs font-bold text-gray-600 dark:text-gray-300 block">تصاویر موجود جهت دانلود (برای انتخاب کلیک کنید):</span>
+                
+                <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+                  {/* Poster Column */}
+                  <div className="space-y-2">
+                    <span className="text-[11px] font-bold text-gray-500 block">پوستر اصلی سریال (Poster):</span>
+                    {fetchedImages.poster ? (
+                      <div 
+                        onClick={() => setSelectedImagesToDownload(prev => ({ ...prev, poster: !prev.poster }))}
+                        className={`relative aspect-[2/3] rounded-xl overflow-hidden border-2 cursor-pointer transition-all group ${
+                          selectedImagesToDownload.poster 
+                            ? 'border-indigo-600 ring-2 ring-indigo-600/30 shadow-lg' 
+                            : 'border-gray-200 dark:border-gray-800 opacity-60 hover:opacity-100'
+                        }`}
+                      >
+                        <img 
+                          src={fetchedImages.poster} 
+                          alt="Poster" 
+                          className="w-full h-full object-cover"
+                          referrerPolicy="no-referrer"
+                        />
+                        <div className={`absolute inset-0 bg-black/40 transition-all flex items-center justify-center ${selectedImagesToDownload.poster ? 'opacity-100' : 'opacity-0 group-hover:opacity-100'}`}>
+                          <div className={`w-10 h-10 rounded-full flex items-center justify-center text-white ${selectedImagesToDownload.poster ? 'bg-indigo-600' : 'bg-gray-600'}`}>
+                            <Check className="w-5 h-5" />
+                          </div>
+                        </div>
+                        <div className="absolute bottom-2 left-2 right-2 bg-black/60 backdrop-blur-sm rounded-lg px-2 py-1 text-center">
+                          <span className="text-[9px] font-bold text-white">نام فایل: poster.jpg</span>
+                        </div>
+                      </div>
+                    ) : (
+                      <div className="aspect-[2/3] bg-gray-100 dark:bg-slate-950 border border-dashed border-gray-200 dark:border-gray-800 rounded-xl flex items-center justify-center">
+                        <span className="text-[10px] text-gray-400">پوستر یافت نشد</span>
+                      </div>
+                    )}
+                  </div>
+
+                  {/* Backdrop Column */}
+                  <div className="space-y-2 md:col-span-2">
+                    <span className="text-[11px] font-bold text-gray-500 block">تصویر پس‌زمینه (Backdrop):</span>
+                    {fetchedImages.backdrop ? (
+                      <div 
+                        onClick={() => setSelectedImagesToDownload(prev => ({ ...prev, backdrop: !prev.backdrop }))}
+                        className={`relative aspect-[16/9] rounded-xl overflow-hidden border-2 cursor-pointer transition-all group ${
+                          selectedImagesToDownload.backdrop 
+                            ? 'border-indigo-600 ring-2 ring-indigo-600/30 shadow-lg' 
+                            : 'border-gray-200 dark:border-gray-800 opacity-60 hover:opacity-100'
+                        }`}
+                      >
+                        <img 
+                          src={fetchedImages.backdrop} 
+                          alt="Backdrop" 
+                          className="w-full h-full object-cover"
+                          referrerPolicy="no-referrer"
+                        />
+                        <div className={`absolute inset-0 bg-black/40 transition-all flex items-center justify-center ${selectedImagesToDownload.backdrop ? 'opacity-100' : 'opacity-0 group-hover:opacity-100'}`}>
+                          <div className={`w-10 h-10 rounded-full flex items-center justify-center text-white ${selectedImagesToDownload.backdrop ? 'bg-indigo-600' : 'bg-gray-600'}`}>
+                            <Check className="w-5 h-5" />
+                          </div>
+                        </div>
+                        <div className="absolute bottom-2 left-2 right-2 bg-black/60 backdrop-blur-sm rounded-lg px-2 py-1 text-center">
+                          <span className="text-[9px] font-bold text-white">نام فایل: backdrop.jpg</span>
+                        </div>
+                      </div>
+                    ) : (
+                      <div className="aspect-[16/9] bg-gray-100 dark:bg-slate-950 border border-dashed border-gray-200 dark:border-gray-800 rounded-xl flex items-center justify-center">
+                        <span className="text-[10px] text-gray-400">پس‌زمینه یافت نشد</span>
+                      </div>
+                    )}
+                  </div>
+                </div>
+
+                {/* Extra Gallery Scenes */}
+                {fetchedImages.gallery && fetchedImages.gallery.length > 0 && (
+                  <div className="space-y-2 pt-2">
+                    <span className="text-[11px] font-bold text-gray-500 block">سایر تصاویر گالری سریال (Scenes):</span>
+                    <div className="grid grid-cols-2 sm:grid-cols-3 gap-3">
+                      {fetchedImages.gallery.map((url, idx) => (
+                        <div 
+                          key={idx}
+                          onClick={() => {
+                            setSelectedImagesToDownload(prev => {
+                              const newGal = [...prev.gallery];
+                              newGal[idx] = !newGal[idx];
+                              return { ...prev, gallery: newGal };
+                            });
+                          }}
+                          className={`relative aspect-[16/9] rounded-xl overflow-hidden border-2 cursor-pointer transition-all group ${
+                            selectedImagesToDownload.gallery[idx] 
+                              ? 'border-indigo-600 ring-2 ring-indigo-600/30 shadow-lg' 
+                              : 'border-gray-200 dark:border-gray-800 opacity-60 hover:opacity-100'
+                          }`}
+                        >
+                          <img 
+                            src={url} 
+                            alt={`Gallery scene ${idx + 1}`} 
+                            className="w-full h-full object-cover"
+                            referrerPolicy="no-referrer"
+                          />
+                          <div className={`absolute inset-0 bg-black/40 transition-all flex items-center justify-center ${selectedImagesToDownload.gallery[idx] ? 'opacity-100' : 'opacity-0 group-hover:opacity-100'}`}>
+                            <div className={`w-8 h-8 rounded-full flex items-center justify-center text-white ${selectedImagesToDownload.gallery[idx] ? 'bg-indigo-600' : 'bg-gray-600'}`}>
+                              <Check className="w-4 h-4" />
+                            </div>
+                          </div>
+                          <div className="absolute bottom-1.5 left-1.5 right-1.5 bg-black/60 backdrop-blur-sm rounded px-1.5 py-0.5 text-center">
+                            <span className="text-[8px] font-bold text-white">gallery_{idx + 1}.jpg</span>
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                )}
+              </div>
+            </div>
+
+            {/* Footer */}
+            <div className="px-6 py-4 bg-gray-50 dark:bg-slate-950/40 border-t border-gray-150 dark:border-slate-800 flex items-center justify-between">
+              <span className="text-[10px] text-gray-500">
+                کل تصاویر انتخابی: {[
+                  selectedImagesToDownload.poster, 
+                  selectedImagesToDownload.backdrop, 
+                  ...selectedImagesToDownload.gallery.filter(Boolean)
+                ].filter(Boolean).length} عدد
+              </span>
+
+              <div className="flex gap-2">
+                <button
+                  type="button"
+                  onClick={() => setShowImagePickerModal(false)}
+                  className="h-10 px-4 bg-white hover:bg-gray-100 dark:bg-slate-800 dark:hover:bg-slate-750 text-gray-700 dark:text-gray-200 border border-gray-200 dark:border-gray-700 rounded-xl text-xs font-bold cursor-pointer transition-all"
+                >
+                  انصراف
+                </button>
+                <button
+                  type="button"
+                  onClick={downloadSelectedImages}
+                  disabled={isDownloadingImages}
+                  className="h-10 px-5 bg-indigo-600 hover:bg-indigo-500 text-white rounded-xl text-xs font-bold flex items-center gap-1.5 transition-all shadow-md cursor-pointer disabled:opacity-50 border-none"
+                >
+                  {isDownloadingImages ? (
+                    <>
+                      <div className="w-4 h-4 border-2 border-white/30 border-t-white rounded-full animate-spin"></div>
+                      <span>در حال دانلود...</span>
+                    </>
+                  ) : (
+                    <>
+                      <Download className="w-4 h-4" />
+                      <span>دانلود و ذخیره روی سیستم</span>
+                    </>
+                  )}
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
 
     </div>
   );

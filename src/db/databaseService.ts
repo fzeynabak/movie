@@ -30,7 +30,8 @@ const DEFAULT_SETTINGS: AppSettings = {
   shopName: 'مدیریت رسانه پارس تک',
   shopAddress: 'تهران، خیابان ولیعصر، تقاطع میرداماد، خدمات رسانه پارس تک',
   shopPhone: '۰۹۳۸۰۰۷۲۰۱۹',
-  shopPhoneSecondary: '۰۲۱-۸۸۸۸۸۸۸۸'
+  shopPhoneSecondary: '۰۲۱-۸۸۸۸۸۸۸۸',
+  videoPlayerMode: 'internal'
 };
 
 class DatabaseService {
@@ -317,7 +318,7 @@ class DatabaseService {
         this.moviesCache = moviesRes.rows.map((r: any) => ({
           ...r,
           genres: this.safeParseJson(r.genres, []),
-          gallery: this.safeParseJson(r.gallery, []),
+          subtitlesList: this.safeParseJson(r.subtitlesList, []),
           purchasePrice: Number(r.purchasePrice || 0),
           salePrice: Number(r.salePrice || 0)
         }));
@@ -330,7 +331,6 @@ class DatabaseService {
           ...r,
           genres: this.safeParseJson(r.genres, []),
           seasons: this.safeParseJson(r.seasons, []),
-          gallery: this.safeParseJson(r.gallery, []),
           purchasePrice: Number(r.purchasePrice || 0),
           salePrice: Number(r.salePrice || 0),
           totalEpisodes: r.totalEpisodes ? Number(r.totalEpisodes) : 0,
@@ -515,7 +515,7 @@ class DatabaseService {
     if (this.isSqliteConnected && typeof window !== 'undefined' && window.electronAPI && window.electronAPI.runSql) {
       window.electronAPI.runSql(`
         INSERT INTO movies 
-        (id, category, titleFa, titleEn, year, director, writer, actors, duration, country, language, imdbRating, quality, subtitle, genres, poster, summary, filePath, purchasePrice, salePrice, addedAt, collectionName, gallery)
+        (id, category, titleFa, titleEn, year, director, writer, actors, duration, country, language, imdbRating, quality, subtitle, genres, poster, summary, filePath, purchasePrice, salePrice, addedAt, collectionName, subtitlesList)
         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
       `, [
         newMovie.id,
@@ -540,7 +540,7 @@ class DatabaseService {
         newMovie.salePrice || 2000,
         newMovie.addedAt,
         newMovie.collectionName || '',
-        JSON.stringify(newMovie.gallery || [])
+        JSON.stringify(newMovie.subtitlesList || [])
       ]).catch(console.error);
     }
 
@@ -562,7 +562,7 @@ class DatabaseService {
           category = ?, titleFa = ?, titleEn = ?, year = ?, director = ?, writer = ?, 
           actors = ?, duration = ?, country = ?, language = ?, imdbRating = ?, quality = ?, 
           subtitle = ?, genres = ?, poster = ?, summary = ?, filePath = ?, purchasePrice = ?, 
-          salePrice = ?, collectionName = ?, gallery = ?
+          salePrice = ?, collectionName = ?, subtitlesList = ?
         WHERE id = ?
       `, [
         updated.category,
@@ -585,7 +585,7 @@ class DatabaseService {
         updated.purchasePrice || 0,
         updated.salePrice || 2000,
         updated.collectionName || '',
-        JSON.stringify(updated.gallery || []),
+        JSON.stringify(updated.subtitlesList || []),
         id
       ]).catch(console.error);
     }
@@ -629,8 +629,8 @@ class DatabaseService {
     if (this.isSqliteConnected && typeof window !== 'undefined' && window.electronAPI && window.electronAPI.runSql) {
       window.electronAPI.runSql(`
         INSERT INTO series 
-        (id, category, titleFa, titleEn, year, director, writer, actors, episodeDuration, country, language, imdbRating, quality, subtitle, genres, poster, summary, filePath, purchasePrice, salePrice, seasons, addedAt, totalEpisodes, myEpisodesCount, releasedEpisodesCount, isEnded, isEndedText, gallery)
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        (id, category, titleFa, titleEn, year, director, writer, actors, episodeDuration, country, language, imdbRating, quality, subtitle, genres, poster, summary, filePath, purchasePrice, salePrice, seasons, addedAt, totalEpisodes, myEpisodesCount, releasedEpisodesCount, isEnded, isEndedText)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
       `, [
         newSeries.id,
         newSeries.category,
@@ -658,8 +658,7 @@ class DatabaseService {
         newSeries.myEpisodesCount || 0,
         newSeries.releasedEpisodesCount || 0,
         newSeries.isEnded ? 1 : 0,
-        newSeries.isEndedText || '',
-        JSON.stringify(newSeries.gallery || [])
+        newSeries.isEndedText || ''
       ]).catch(console.error);
     }
 
@@ -682,7 +681,7 @@ class DatabaseService {
           actors = ?, episodeDuration = ?, country = ?, language = ?, imdbRating = ?, quality = ?, 
           subtitle = ?, genres = ?, poster = ?, summary = ?, filePath = ?, purchasePrice = ?, 
           salePrice = ?, seasons = ?, totalEpisodes = ?, myEpisodesCount = ?, releasedEpisodesCount = ?,
-          isEnded = ?, isEndedText = ?, gallery = ?
+          isEnded = ?, isEndedText = ?
         WHERE id = ?
       `, [
         updated.category,
@@ -710,7 +709,6 @@ class DatabaseService {
         updated.releasedEpisodesCount || 0,
         updated.isEnded ? 1 : 0,
         updated.isEndedText || '',
-        JSON.stringify(updated.gallery || []),
         id
       ]).catch(console.error);
     }
@@ -1092,17 +1090,17 @@ class DatabaseService {
       // Save Movies
       for (const m of this.moviesCache) {
         await window.electronAPI.runSql(`
-          INSERT INTO movies (id, category, titleFa, titleEn, year, director, writer, actors, duration, country, language, imdbRating, quality, subtitle, genres, poster, summary, filePath, purchasePrice, salePrice, addedAt, collectionName, gallery)
-          VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-        `, [m.id, m.category, m.titleFa, m.titleEn, m.year, m.director, m.writer, m.actors, m.duration, m.country || 'ایران', m.language || 'فارسی (دوبله)', m.imdbRating, m.quality, m.subtitle, JSON.stringify(m.genres), m.poster, m.summary, m.filePath || '', m.purchasePrice, m.salePrice, m.addedAt, m.collectionName || '', JSON.stringify(m.gallery || [])]);
+          INSERT INTO movies (id, category, titleFa, titleEn, year, director, writer, actors, duration, country, language, imdbRating, quality, subtitle, genres, poster, summary, filePath, purchasePrice, salePrice, addedAt, collectionName)
+          VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        `, [m.id, m.category, m.titleFa, m.titleEn, m.year, m.director, m.writer, m.actors, m.duration, m.country || 'ایران', m.language || 'فارسی (دوبله)', m.imdbRating, m.quality, m.subtitle, JSON.stringify(m.genres), m.poster, m.summary, m.filePath || '', m.purchasePrice, m.salePrice, m.addedAt, m.collectionName || '']);
       }
 
       // Save Series
       for (const s of this.seriesCache) {
         await window.electronAPI.runSql(`
-          INSERT INTO series (id, category, titleFa, titleEn, year, director, writer, actors, episodeDuration, country, language, imdbRating, quality, subtitle, genres, poster, summary, filePath, purchasePrice, salePrice, seasons, addedAt, totalEpisodes, myEpisodesCount, releasedEpisodesCount, isEnded, isEndedText, gallery)
-          VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-        `, [s.id, s.category, s.titleFa, s.titleEn, s.year, s.director, s.writer, s.actors, s.episodeDuration, s.country || 'ایران', s.language || 'فارسی (دوبله)', s.imdbRating, s.quality, s.subtitle, JSON.stringify(s.genres), s.poster, s.summary, s.filePath || '', s.purchasePrice, s.salePrice, JSON.stringify(s.seasons), s.addedAt, s.totalEpisodes || 0, s.myEpisodesCount || 0, s.releasedEpisodesCount || 0, s.isEnded ? 1 : 0, s.isEndedText || '', JSON.stringify(s.gallery || [])]);
+          INSERT INTO series (id, category, titleFa, titleEn, year, director, writer, actors, episodeDuration, country, language, imdbRating, quality, subtitle, genres, poster, summary, filePath, purchasePrice, salePrice, seasons, addedAt, totalEpisodes, myEpisodesCount, releasedEpisodesCount, isEnded, isEndedText)
+          VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        `, [s.id, s.category, s.titleFa, s.titleEn, s.year, s.director, s.writer, s.actors, s.episodeDuration, s.country || 'ایران', s.language || 'فارسی (دوبله)', s.imdbRating, s.quality, s.subtitle, JSON.stringify(s.genres), s.poster, s.summary, s.filePath || '', s.purchasePrice, s.salePrice, JSON.stringify(s.seasons), s.addedAt, s.totalEpisodes || 0, s.myEpisodesCount || 0, s.releasedEpisodesCount || 0, s.isEnded ? 1 : 0, s.isEndedText || '']);
       }
 
       // Save Sales

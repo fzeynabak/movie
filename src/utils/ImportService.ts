@@ -52,13 +52,27 @@ export class ImportService {
             return s.titleEn.toLowerCase() === titleEn.toLowerCase() || s.titleFa === titleFa;
           });
 
+          // Detect associated subtitles automatically
+          let subtitlesList: string[] = [];
+          if (window.electronAPI && window.electronAPI.findMatchingSubtitles) {
+            try {
+              const res = await window.electronAPI.findMatchingSubtitles(item.file.fullPath);
+              if (res && res.success && res.subtitles) {
+                subtitlesList = res.subtitles;
+              }
+            } catch (err) {
+              console.error('Auto sub scanning error for episode:', err);
+            }
+          }
+
           // Build Episode item
           const newEpisode: Episode = {
             id: 'ep_' + Math.random().toString(36).substr(2, 9),
             episodeNumber: epNum,
             name: epName,
             videoPath: item.file.fullPath,
-            description: item.tmdb?.overview || ''
+            description: item.tmdb?.overview || '',
+            subtitlesList: subtitlesList.length > 0 ? subtitlesList : undefined
           };
 
           if (existingSeries) {
@@ -157,6 +171,19 @@ export class ImportService {
           const titleEn = item.tmdb?.originalTitle || parsedMovie.title;
           const titleFa = item.tmdb?.title || parsedMovie.title;
 
+          // Detect associated subtitles automatically
+          let subtitlesList: string[] = [];
+          if (window.electronAPI && window.electronAPI.findMatchingSubtitles) {
+            try {
+              const res = await window.electronAPI.findMatchingSubtitles(item.file.fullPath);
+              if (res && res.success && res.subtitles) {
+                subtitlesList = res.subtitles;
+              }
+            } catch (err) {
+              console.error('Auto sub scanning error for movie:', err);
+            }
+          }
+
           const newMovieItem: Omit<Movie, 'id' | 'addedAt'> = {
             category: defaultCategory,
             titleFa,
@@ -179,7 +206,8 @@ export class ImportService {
             salePrice: defaultMoviePrice,
             officialSite: tmdbId ? `https://www.themoviedb.org/movie/${tmdbId}` : undefined,
             collectionName: item.tmdb ? `TMDb ID: ${tmdbId}` : undefined,
-            gallery: item.tmdb?.gallery || []
+            gallery: item.tmdb?.gallery || [],
+            subtitlesList: subtitlesList.length > 0 ? subtitlesList : undefined
           };
 
           dbService.addMovie(newMovieItem);

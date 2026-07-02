@@ -5,6 +5,7 @@
 
 import React, { useState, useEffect } from 'react';
 import { dbService } from './db/databaseService';
+import { InternalVideoPlayer } from './components/InternalVideoPlayer';
 import { AppSettings, CartItem, CustomerSession } from './types';
 import { showToast } from './utils/toast';
 import Dashboard from './pages/Dashboard';
@@ -13,8 +14,6 @@ import SeriesPage from './pages/Series';
 import SalesPage from './pages/Sales';
 import SettingsPage from './pages/Settings';
 import ContactUs from './pages/ContactUs';
-import LANSharingPage from './pages/LAN';
-import DBTestPage from './pages/DBTest';
 import AuthScreen from './components/AuthScreen';
 import DBLogger from './components/DBLogger';
 import CartBar from './components/CartBar';
@@ -40,8 +39,7 @@ import {
   Minus,
   Square,
   Lock,
-  LogOut,
-  Network
+  LogOut
 } from 'lucide-react';
 
 export default function App() {
@@ -59,7 +57,7 @@ export default function App() {
 
   const [isLoggedIn, setIsLoggedIn] = useState<boolean>(() => localStorage.getItem('parstech_user_logged_in') === 'true');
   const [sqliteActive, setSqliteActive] = useState<boolean>(() => dbService.getSqliteConnected());
-  const [activeTab, setActiveTab] = useState<'dashboard' | 'movies' | 'series' | 'sales' | 'settings' | 'contact' | 'lan' | 'dbtest'>('dashboard');
+  const [activeTab, setActiveTab] = useState<'dashboard' | 'movies' | 'series' | 'sales' | 'settings' | 'contact' | 'dbtest'>('dashboard');
   const [appSettings, setAppSettings] = useState<AppSettings>(dbService.getSettings());
   const [localIps, setLocalIps] = useState<string[]>([]);
   const [showAboutModal, setShowAboutModal] = useState(false);
@@ -67,6 +65,7 @@ export default function App() {
   const [showIpDropdown, setShowIpDropdown] = useState(false);
   const [dbPathDisplay, setDbPathDisplay] = useState<string>('دیتابیس: حافظه محلی مرورگر');
   const [activeMediaId, setActiveMediaId] = useState<string | null>(null);
+  const [activeVideo, setActiveVideo] = useState<{ filePath: string; title: string; originPeerIp?: string; subtitlesList?: string[] } | null>(null);
 
   const handleMinimize = () => {
     if (typeof window !== 'undefined' && window.electronAPI && window.electronAPI.minimizeWindow) {
@@ -121,9 +120,18 @@ export default function App() {
       }).catch(err => console.error(err));
     }
 
+    const handlePlayVideoInternal = (e: Event) => {
+      const customEvent = e as CustomEvent<{ filePath: string; title: string; originPeerIp?: string; subtitlesList?: string[] }>;
+      if (customEvent.detail) {
+        setActiveVideo(customEvent.detail);
+      }
+    };
+
     window.addEventListener('db_synced_from_disk', handleSync);
+    window.addEventListener('play_video_internal', handlePlayVideoInternal as EventListener);
     return () => {
       window.removeEventListener('db_synced_from_disk', handleSync);
+      window.removeEventListener('play_video_internal', handlePlayVideoInternal as EventListener);
     };
   }, []);
 
@@ -403,8 +411,6 @@ export default function App() {
     { id: 'movies', label: 'مدیریت فیلم‌ها', icon: Film },
     { id: 'series', label: 'مدیریت سریال‌ها', icon: Tv },
     { id: 'sales', label: 'فروش و مدیریت مالی', icon: CreditCard },
-    { id: 'lan', label: 'شبکه محلی (LAN)', icon: Network },
-    { id: 'dbtest', label: 'تست و عیب‌یابی دیتابیس', icon: Database },
     { id: 'settings', label: 'تنظیمات مدیا سنتر', icon: SettingsIcon },
     { id: 'contact', label: 'ارتباط با ما و پشتیبانی', icon: HelpCircle },
   ];
@@ -472,115 +478,23 @@ export default function App() {
                   >
                     بازنشانی به حالت کارخانه
                   </button>
-                  
+
                   <div className="border-t border-gray-100 dark:border-gray-800 my-1.5"></div>
                   <div className="px-3 pb-1 mb-1 text-[10px] text-gray-400 font-extrabold">بستن نرم‌افزار</div>
                   <button 
                     onClick={() => { setShowFileMenu(false); handleFullQuit(); }}
-                    className="w-full text-right px-3.5 py-2 hover:bg-gray-50 dark:hover:bg-slate-800 text-[11px] font-bold block transition-colors"
+                    className="w-full text-right px-3.5 py-2 hover:bg-red-50 dark:hover:bg-red-950/25 text-red-500 text-[11px] font-bold block transition-colors"
                   >
-                    خروج قطعی از برنامه
+                    خروج کامل از برنامه
                   </button>
                 </div>
               )}
             </div>
-
-            <button onClick={() => window.location.reload()} className="px-3 py-1.5 rounded-lg text-xs hover:bg-gray-50 dark:hover:bg-slate-800/60 cursor-pointer transition-colors">نمایش</button>
-            <button onClick={() => setActiveTab('settings')} className="px-3 py-1.5 rounded-lg text-xs hover:bg-gray-50 dark:hover:bg-slate-800/60 cursor-pointer transition-colors">ابزارها</button>
-            <button onClick={() => setShowAboutModal(true)} className="px-3 py-1.5 rounded-lg text-xs hover:bg-gray-50 dark:hover:bg-slate-800/60 cursor-pointer transition-colors" id="btn-about-trigger">درباره</button>
           </div>
         </div>
 
         {/* Left Section: Quick Theme Switcher & Premium macOS-Style window controls */}
         <div className="flex items-center gap-3" style={{ WebkitAppRegion: 'no-drag' } as React.CSSProperties}>
-          
-          {/* LAN Network IP Status Pill */}
-          <div className="relative" style={{ WebkitAppRegion: 'no-drag' } as React.CSSProperties}>
-            <button
-              onClick={() => setShowIpDropdown(!showIpDropdown)}
-              className={`flex items-center gap-1.5 h-8 px-2.5 rounded-full border text-[11px] font-bold transition-all duration-300 cursor-pointer ${
-                appSettings.lanEnabled !== false
-                  ? 'bg-emerald-500/5 hover:bg-emerald-500/10 border-emerald-500/20 text-emerald-650 dark:text-emerald-400'
-                  : 'bg-gray-50 hover:bg-gray-100 border-gray-200 text-gray-500 dark:bg-slate-800/40 dark:border-gray-850 dark:text-gray-400'
-              }`}
-              id="header-lan-ip-pill"
-              title="مشخصات آی‌پی و وضعیت شبکه محلی"
-            >
-              <Network className="w-3.5 h-3.5" />
-              <span>
-                {appSettings.lanEnabled !== false
-                  ? (localIps.length > 0 ? localIps[0] : 'آی‌پی شبکه')
-                  : 'شبکه غیرفعال'}
-              </span>
-              <span className={`w-1.5 h-1.5 rounded-full ${appSettings.lanEnabled !== false ? 'bg-emerald-500 animate-pulse' : 'bg-gray-400'}`}></span>
-            </button>
-
-            {showIpDropdown && (
-              <div 
-                className="absolute left-0 top-full mt-2 bg-white dark:bg-[#1e293b] border border-gray-150 dark:border-gray-800/80 rounded-2xl shadow-2xl p-4 w-72 z-50 animate-scaleIn select-text text-right"
-                id="header-lan-ip-dropdown"
-              >
-                <div className="flex items-center justify-between border-b border-gray-100 dark:border-gray-800 pb-2 mb-3">
-                  <span className="text-[10px] text-gray-400 font-extrabold font-mono">PORT: 3300</span>
-                  <div className="flex items-center gap-1">
-                    <span className="text-xs font-black text-gray-800 dark:text-white">وضعیت شبکه محلی</span>
-                    <Network className="w-3.5 h-3.5 text-indigo-500" />
-                  </div>
-                </div>
-
-                {appSettings.lanEnabled !== false ? (
-                  <div className="space-y-3">
-                    <p className="text-[10px] text-gray-400/90 leading-relaxed font-bold">
-                      لیست IPهای این سیستم در شبکه همکار:
-                    </p>
-                    <div className="space-y-1.5 max-h-40 overflow-y-auto pr-1">
-                      {localIps.length > 0 ? (
-                        localIps.map((ip, i) => (
-                          <div 
-                            key={i}
-                            onClick={() => {
-                              navigator.clipboard.writeText(ip);
-                              showToast(`آی‌پی ${ip} با موفقیت در حافظه موقت کپی شد.`, 'success');
-                            }}
-                            className="flex items-center justify-between p-2 rounded-lg bg-gray-50 hover:bg-indigo-50/50 dark:bg-slate-800/80 dark:hover:bg-slate-750 border border-gray-100 dark:border-gray-750 cursor-pointer group transition-all duration-200"
-                            title="برای کپی آی‌پی کلیک کنید"
-                          >
-                            <span className="text-[9px] text-indigo-550 dark:text-indigo-400 font-black opacity-0 group-hover:opacity-100 transition-opacity">کپی شد</span>
-                            <span className="text-xs font-mono font-bold text-gray-750 dark:text-gray-300">{ip}</span>
-                          </div>
-                        ))
-                      ) : (
-                        <div className="text-center py-2 text-[11px] text-amber-500 font-bold">
-                          آی‌پی محلی پیدا نشد.
-                        </div>
-                      )}
-                    </div>
-                    <button
-                      onClick={() => { setShowIpDropdown(false); setActiveTab('lan'); }}
-                      className="w-full h-8 px-2 bg-indigo-600 hover:bg-indigo-750 text-white text-[11px] font-bold rounded-lg transition-colors cursor-pointer"
-                    >
-                      ورود به صفحه همگام‌سازی شبکه
-                    </button>
-                  </div>
-                ) : (
-                  <div className="space-y-3 text-center py-1">
-                    <div className="text-amber-500 font-black text-xs">اشتراک‌گذاری هارد غیرفعال است</div>
-                    <p className="text-[10px] text-gray-400 mt-1 leading-relaxed">
-                      برای فعال‌سازی و برقراری ارتباط با صنف، در تنظیمات شبکه تیک اشتراک شبکه را بزنید.
-                    </p>
-                    <button
-                      onClick={() => { setShowIpDropdown(false); setActiveTab('settings'); }}
-                      className="w-full h-8 px-2 bg-indigo-600 hover:bg-indigo-750 text-white text-[11px] font-bold rounded-lg transition-colors cursor-pointer"
-                    >
-                      ورود به صفحه تنظیمات
-                    </button>
-                  </div>
-                )}
-              </div>
-            )}
-          </div>
-
-          <div className="w-px h-6 bg-gray-200 dark:bg-gray-800/80 mx-1"></div>
 
           {/* Circular Glassmorphism Theme Toggler */}
           <button
@@ -774,7 +688,6 @@ export default function App() {
               />
             )}
             {activeTab === 'sales' && <SalesPage />}
-            {activeTab === 'lan' && <LANSharingPage />}
             {activeTab === 'settings' && (
               <SettingsPage 
                 onSettingsChange={setAppSettings} 
@@ -785,7 +698,6 @@ export default function App() {
               />
             )}
             {activeTab === 'contact' && <ContactUs />}
-            {activeTab === 'dbtest' && <DBTestPage />}
           </div>
         </main>
 
@@ -847,6 +759,21 @@ export default function App() {
           );
         })}
       </div>
+
+      {activeVideo && (
+        <InternalVideoPlayer
+          filePath={activeVideo.filePath}
+          title={activeVideo.title}
+          subtitlesList={activeVideo.subtitlesList}
+          originPeerIp={activeVideo.originPeerIp}
+          onClose={() => setActiveVideo(null)}
+          onPlayExternal={() => {
+            if (window.electronAPI && window.electronAPI.playVideoFile) {
+              window.electronAPI.playVideoFile(activeVideo.filePath, activeVideo.originPeerIp);
+            }
+          }}
+        />
+      )}
 
     </div>
   );

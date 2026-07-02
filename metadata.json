@@ -1,5 +1,5 @@
 {
-  "name": "ParsTech Media Center",
+  "name": "Movie ParsTech",
   "description": "A comprehensive media catalog, scheduling, and sales management system for digital movie and series shops, with full Persian localization.",
   "requestFramePermissions": [],
   "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]

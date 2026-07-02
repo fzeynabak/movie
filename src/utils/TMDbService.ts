@@ -24,6 +24,7 @@ export interface TMDbMetadata {
   countries: string[];
   mediaType: 'movie' | 'tv';
   gallery?: string[]; // full image URLs for backdrops/scenes
+  tvSeasons?: { seasonNumber: number; name: string; episodeCount: number; }[];
 }
 
 export class TMDbService {
@@ -378,6 +379,17 @@ export class TMDbService {
         ? (data.production_countries || enData?.production_countries || []).map((c: any) => c.name || c.iso_3166_1)
         : (data.origin_country || enData?.origin_country || []);
 
+      let tvSeasons: any[] = [];
+      if (mediaType === 'tv' && data.seasons) {
+        tvSeasons = data.seasons
+          .filter((s: any) => s.season_number > 0)
+          .map((s: any) => ({
+            seasonNumber: s.season_number,
+            name: s.name || `فصل ${s.season_number}`,
+            episodeCount: s.episode_count || 0
+          }));
+      }
+
       return {
         id: mergedData.id,
         title,
@@ -395,7 +407,8 @@ export class TMDbService {
         productionCompanies,
         countries,
         mediaType,
-        gallery
+        gallery,
+        tvSeasons
       };
     } catch (err) {
       console.error(`Error fetching TMDb details for ${mediaType} ${id}:`, err);

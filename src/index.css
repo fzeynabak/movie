@@ -3,43 +3,6 @@
 
 @variant dark (&:where(.dark, .dark *));
 
-/* AnjomanMax */
-@font-face {
-  font-family: "AnjomanMax";
-  src: url("../assets/fonts/AnjomanMax-Regular.woff2") format("woff2"),
-       url("../assets/fonts/AnjomanMax-Regular.woff") format("woff"),
-       url("../assets/fonts/AnjomanMax-Regular.ttf") format("truetype"),
-       url("../assets/fonts/AnjomanMax-Regular.eot") format("embedded-opentype"),
-       url("../assets/fonts/AnjomanMax-Regular.svg#AnjomanMax") format("svg");
-  font-weight: 400;
-  font-style: normal;
-  font-display: swap;
-}
-
-@font-face {
-  font-family: "AnjomanMax";
-  src: url("../assets/fonts/AnjomanMax-Medium.woff2") format("woff2"),
-       url("../assets/fonts/AnjomanMax-Medium.woff") format("woff"),
-       url("../assets/fonts/AnjomanMax-Medium.ttf") format("truetype"),
-       url("../assets/fonts/AnjomanMax-Medium.eot") format("embedded-opentype"),
-       url("../assets/fonts/AnjomanMax-Medium.svg#AnjomanMax") format("svg");
-  font-weight: 500;
-  font-style: normal;
-  font-display: swap;
-}
-
-@font-face {
-  font-family: "AnjomanMax";
-  src: url("../assets/fonts/AnjomanMax-Medium.woff2") format("woff2"),
-       url("../assets/fonts/AnjomanMax-Medium.woff") format("woff"),
-       url("../assets/fonts/AnjomanMax-Medium.ttf") format("truetype"),
-       url("../assets/fonts/AnjomanMax-Medium.eot") format("embedded-opentype"),
-       url("../assets/fonts/AnjomanMax-Medium.svg#AnjomanMax") format("svg");
-  font-weight: 700;
-  font-style: normal;
-  font-display: swap;
-}
-
 /* IRANSansXFaNum */
 @font-face {
   font-family: "IRANSansXFaNum";
@@ -176,8 +139,8 @@
 }
 
 @theme {
-  --font-sans: "AnjomanMax", "Vazirmatn", "IRANSansXFaNum", "YekanBakhFaNum", "Tahoma", ui-sans-serif, system-ui, sans-serif;
-  --font-mono: "AnjomanMax", "Vazirmatn", "IRANSansXFaNum", "YekanBakhFaNum", ui-monospace, monospace;
+  --font-sans: "Vazirmatn", "IRANSansXFaNum", "YekanBakhFaNum", "Tahoma", ui-sans-serif, system-ui, sans-serif;
+  --font-mono: "Vazirmatn", "IRANSansXFaNum", "YekanBakhFaNum", ui-monospace, monospace;
 
   --color-gray-150: #f1f5f9;
   --color-gray-205: #e2e8f0;
@@ -253,13 +216,13 @@
   -webkit-app-region: no-drag;
 }
 td.p-4.font-mono.font-bold.text-emerald-600.dark\:text-\[\#10b981\] {
-    font-family:  "AnjomanMax", "YekanBakhFaNum", "IRANSansXFaNum",'Vazirmatn';
+    font-family:  "YekanBakhFaNum", "IRANSansXFaNum",'Vazirmatn';
     font-size: 15px;
 }
 
 /* Force beautiful Persian font for html, body, and all standard text elements, inputs, selectors, and monospace numbers */
 html, body, div, span, p, h1, h2, h3, h4, h5, h6, label, input, select, textarea, button, .font-mono {
-  font-family:  "AnjomanMax", "YekanBakhFaNum", "IRANSansXFaNum", "Vazirmatn", "Tahoma", sans-serif !important;
+  font-family:  "YekanBakhFaNum", "IRANSansXFaNum", "Vazirmatn", "Tahoma", sans-serif !important;
 }
 button.px-4.py-1.bg-indigo-650.hover\:bg-indigo-700.text-white.rounded.text-\[10px\].font-bold.cursor-pointer.transition-colors {
     background-color: #00a156;

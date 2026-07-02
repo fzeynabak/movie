@@ -92,7 +92,7 @@ function createWindow() {
   // In development, load the Vite dev server. In production, load the static build.
   const isDev = process.env.NODE_ENV === 'development';
   if (isDev) {
-    mainWindow.loadURL('http://localhost:3000');
+    mainWindow.loadURL('http://localhost:3050');
   } else {
     mainWindow.loadFile(path.join(__dirname, '../dist/index.html'));
   }
@@ -450,7 +450,7 @@ const DB_SCHEMAS = {
       salePrice REAL,
       addedAt TEXT,
       collectionName TEXT,
-      gallery TEXT
+      subtitlesList TEXT
     )`,
     indexes: [
       'CREATE INDEX IF NOT EXISTS idx_movies_added_at ON movies(addedAt)',
@@ -458,7 +458,7 @@ const DB_SCHEMAS = {
     ],
     migrations: [
       "ALTER TABLE movies ADD COLUMN collectionName TEXT",
-      "ALTER TABLE movies ADD COLUMN gallery TEXT"
+      "ALTER TABLE movies ADD COLUMN subtitlesList TEXT"
     ]
   },
   series: {
@@ -489,8 +489,7 @@ const DB_SCHEMAS = {
       myEpisodesCount INTEGER DEFAULT 0,
       releasedEpisodesCount INTEGER DEFAULT 0,
       isEnded INTEGER DEFAULT 0,
-      isEndedText TEXT,
-      gallery TEXT
+      isEndedText TEXT
     )`,
     indexes: [
       'CREATE INDEX IF NOT EXISTS idx_series_added_at ON series(addedAt)',
@@ -501,8 +500,7 @@ const DB_SCHEMAS = {
       "ALTER TABLE series ADD COLUMN myEpisodesCount INTEGER DEFAULT 0",
       "ALTER TABLE series ADD COLUMN releasedEpisodesCount INTEGER DEFAULT 0",
       "ALTER TABLE series ADD COLUMN isEnded INTEGER DEFAULT 0",
-      "ALTER TABLE series ADD COLUMN isEndedText TEXT",
-      "ALTER TABLE series ADD COLUMN gallery TEXT"
+      "ALTER TABLE series ADD COLUMN isEndedText TEXT"
     ]
   },
   sales: {
@@ -1939,7 +1937,7 @@ function createWidgetWindow() {
 
   const isDev = process.env.NODE_ENV === 'development';
   if (isDev) {
-    widgetWindow.loadURL('http://localhost:3000/#widget');
+    widgetWindow.loadURL('http://localhost:3050/#widget');
   } else {
     widgetWindow.loadURL(`file://${path.join(__dirname, '../dist/index.html')}#widget`);
   }
@@ -2501,6 +2499,84 @@ ipcMain.handle('copy-file-to-usb', async (event, { sourcePath, destDir, id }) =>
       resolve({ success: false, error: 'خطای سیستمی کپی فایل: ' + err.message });
     }
   });
+});
+
+// Find matching subtitles automatically in the same directory as a video file
+ipcMain.handle('find-matching-subtitles', async (event, videoPath) => {
+  try {
+    if (!videoPath || !fs.existsSync(videoPath)) {
+      return { success: false, error: 'مسیر ویدیو نامعتبر است یا وجود ندارد.' };
+    }
+    const folder = path.dirname(videoPath);
+    const baseName = path.basename(videoPath, path.extname(videoPath)).toLowerCase();
+    const entries = fs.readdirSync(folder);
+    const subExtensions = ['.srt', '.vtt', '.sub', '.ass'];
+    const matchingSubs = [];
+    
+    for (const entry of entries) {
+      const ext = path.extname(entry).toLowerCase();
+      if (subExtensions.includes(ext)) {
+        const entryBase = path.basename(entry, ext).toLowerCase();
+        if (entryBase.startsWith(baseName) || baseName.startsWith(entryBase) || entryBase.includes(baseName)) {
+          matchingSubs.push(path.join(folder, entry));
+        }
+      }
+    }
+    return { success: true, subtitles: matchingSubs };
+  } catch (err) {
+    return { success: false, error: err.message };
+  }
+});
+
+// Export SQLite Database to external folder
+ipcMain.handle('export-sqlite-db', async (event, destPath) => {
+  try {
+    const srcPath = getSqliteDbPath();
+    if (!fs.existsSync(srcPath)) {
+      return { success: false, error: 'پایگاه داده یافت نشد.' };
+    }
+    fs.copyFileSync(srcPath, destPath);
+    return { success: true };
+  } catch (err) {
+    return { success: false, error: err.message };
+  }
+});
+
+// Import SQLite Database from backup file
+ipcMain.handle('import-sqlite-db', async (event, srcPath) => {
+  try {
+    if (!fs.existsSync(srcPath)) {
+      return { success: false, error: 'فایل منبع یافت نشد.' };
+    }
+    const destPath = getSqliteDbPath();
+    if (sqliteDb) {
+      sqliteDb.close();
+      sqliteDb = null;
+    }
+    fs.copyFileSync(srcPath, destPath);
+    
+    // Re-initialize connection
+    const Database = require('better-sqlite3');
+    sqliteDb = new Database(destPath, { fileMustExist: false });
+    createTables();
+    isSqliteInitialized = true;
+    return { success: true };
+  } catch (err) {
+    return { success: false, error: err.message };
+  }
+});
+
+// Read local text file (e.g. subtitle files)
+ipcMain.handle('read-text-file', async (event, filepath) => {
+  try {
+    if (!filepath || !fs.existsSync(filepath)) {
+      return { success: false, error: 'فایل وجود ندارد یا مسیر نامعتبر است.' };
+    }
+    const content = fs.readFileSync(filepath, 'utf8');
+    return { success: true, content };
+  } catch (err) {
+    return { success: false, error: err.message };
+  }
 });
 
 app.whenReady().then(() => {

@@ -4,6 +4,7 @@
  */
 
 import React, { useState, useEffect } from 'react';
+import Swal from 'sweetalert2';
 import { dbService } from '../db/databaseService';
 import { AppSettings, DefaultPaths } from '../types';
 import { SettingsService } from '../utils/SettingsService';
@@ -35,7 +36,11 @@ import {
   Film,
   Terminal,
   Eye,
-  EyeOff
+  EyeOff,
+  Plus,
+  FileText,
+  Server,
+  Play
 } from 'lucide-react';
 
 interface SettingsPageProps {
@@ -64,6 +69,7 @@ export default function SettingsPage({ onSettingsChange, onLogout }: SettingsPag
 
   const [pageSize, setPageSize] = useState<20 | 50 | 100>(20);
   const [theme, setTheme] = useState<'light' | 'dark'>('dark');
+  const [videoPlayerMode, setVideoPlayerMode] = useState<'internal' | 'external'>('internal');
   const [defaultMoviePrice, setDefaultMoviePrice] = useState(2000);
   const [defaultSeriesPrice, setDefaultSeriesPrice] = useState(1500);
   const [defaultQuality, setDefaultQuality] = useState('1080p BluRay');
@@ -119,6 +125,177 @@ export default function SettingsPage({ onSettingsChange, onLogout }: SettingsPag
   const [sqlExecuted, setSqlExecuted] = useState<boolean>(false);
   const [isConsoleRunning, setIsConsoleRunning] = useState<boolean>(false);
 
+  // DB Test states merged from DBTest.tsx
+  const [moviesList, setMoviesList] = useState<any[]>([]);
+  const [loadingMovies, setLoadingMovies] = useState<boolean>(false);
+  const [titleFa, setTitleFa] = useState('');
+  const [titleEn, setTitleEn] = useState('');
+  const [director, setDirector] = useState('');
+  const [year, setYear] = useState('');
+  const [category, setCategory] = useState('اکشن');
+  const [salePrice, setSalePrice] = useState('2500');
+  const [filePath, setFilePath] = useState('D:\\Movies\\test_file.mkv');
+
+  const loadTestMovies = async () => {
+    if (typeof window === 'undefined' || !window.electronAPI || !window.electronAPI.runSql) {
+      return;
+    }
+    setLoadingMovies(true);
+    try {
+      const res = await window.electronAPI.runSql('SELECT * FROM movies ORDER BY addedAt DESC LIMIT 10;');
+      if (res.success && res.rows) {
+        setMoviesList(res.rows);
+      }
+    } catch (err) {
+      console.error('Error loading movies:', err);
+    } finally {
+      setLoadingMovies(false);
+    }
+  };
+
+  const handleSaveTestRecord = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!titleFa) {
+      Swal.fire({
+        title: 'فیلد الزامی خالی است',
+        text: 'لطفاً عنوان فارسی فیلم آزمایشی را وارد کنید.',
+        icon: 'warning',
+        confirmButtonText: 'اصلاح فرم',
+        confirmButtonColor: '#f59e0b',
+        customClass: { popup: 'rounded-2xl font-sans' }
+      });
+      return;
+    }
+
+    if (typeof window === 'undefined' || !window.electronAPI || !window.electronAPI.runSql) {
+      Swal.fire({
+        title: 'خطای عدم اتصال',
+        text: 'ماژول SQLite در مرورگر در دسترس نیست. این بخش نیاز به پردازش بومی Electron دارد.',
+        icon: 'error',
+        confirmButtonText: 'متوجه شدم',
+        confirmButtonColor: '#ef4444',
+        customClass: { popup: 'rounded-2xl font-sans' }
+      });
+      return;
+    }
+
+    const testId = 'test_' + Math.random().toString(36).substring(2, 9);
+    const addedAtStr = new Date().toISOString();
+    const priceNum = parseFloat(salePrice) || 0;
+
+    const sql = `
+      INSERT INTO movies (id, category, titleFa, titleEn, director, year, salePrice, filePath, addedAt)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+    `;
+    const params = [testId, category, titleFa, titleEn, director, year, priceNum, filePath, addedAtStr];
+
+    try {
+      const res = await window.electronAPI.runSql(sql, params);
+      if (res.success) {
+        Swal.fire({
+          title: 'ذخیره موفق در SQLite! 🎉',
+          html: `
+            <div class="text-right space-y-2 text-xs text-gray-600 dark:text-gray-350" dir="rtl">
+              <p>داده آزمایشی شما با موفقیت با متد <strong>better-sqlite3</strong> ذخیره شد.</p>
+              <div class="bg-gray-100 dark:bg-slate-900 p-3 rounded-lg font-mono text-[11px] text-left overflow-x-auto mt-2 space-y-1">
+                <div><strong>شناسه رکورد (ID):</strong> <span class="text-indigo-600 dark:text-indigo-400 font-bold">${testId}</span></div>
+                <div><strong>عنوان فارسی:</strong> ${titleFa}</div>
+                <div><strong>تعداد تغییرات (Changes):</strong> ${res.changes || 1}</div>
+                <div><strong>آخرین RowID:</strong> ${res.lastID || 'شناسه خودکار'}</div>
+              </div>
+            </div>
+          `,
+          icon: 'success',
+          confirmButtonText: 'عالیه، بروزرسانی جدول',
+          confirmButtonColor: '#4f46e5',
+          customClass: { popup: 'rounded-2xl font-sans' }
+        });
+        
+        // Clear fields
+        setTitleFa('');
+        setTitleEn('');
+        setDirector('');
+        setYear('');
+        
+        // Refresh Table
+        loadTestMovies();
+      } else {
+        Swal.fire({
+          title: 'خطا در ثبت SQLite',
+          text: res.error || 'خطای ناشناخته دیتابیس.',
+          icon: 'error',
+          confirmButtonText: 'بررسی مجدد',
+          confirmButtonColor: '#ef4444',
+          customClass: { popup: 'rounded-2xl font-sans' }
+        });
+      }
+    } catch (err: any) {
+      Swal.fire({
+        title: 'خطای سیستمی دیتابیس',
+        text: err.message,
+        icon: 'error',
+        confirmButtonText: 'بستن',
+        confirmButtonColor: '#ef4444',
+        customClass: { popup: 'rounded-2xl font-sans' }
+      });
+    }
+  };
+
+  const handleDeleteTestRecord = async (id: string) => {
+    const result = await Swal.fire({
+      title: 'حذف رکورد آزمایشی؟',
+      text: 'آیا مایلید این فیلم آزمایشی را از پایگاه‌داده SQLite حذف کنید؟',
+      icon: 'warning',
+      showCancelButton: true,
+      confirmButtonText: 'بله، حذف کن',
+      cancelButtonText: 'خیر، نگه دار',
+      confirmButtonColor: '#ef4444',
+      cancelButtonColor: '#6b7280',
+      customClass: { popup: 'rounded-2xl font-sans' }
+    });
+
+    if (result.isConfirmed) {
+      try {
+        const res = await window.electronAPI.runSql('DELETE FROM movies WHERE id = ?;', [id]);
+        if (res.success) {
+          Swal.fire({
+            title: 'حذف موفقیت‌آمیز',
+            text: 'رکورد مورد نظر با موفقیت از هارد سیستم حذف گردید.',
+            icon: 'success',
+            confirmButtonText: 'تایید',
+            confirmButtonColor: '#10b981',
+            customClass: { popup: 'rounded-2xl font-sans' }
+          });
+          loadTestMovies();
+        } else {
+          Swal.fire({
+            title: 'خطا در حذف',
+            text: res.error || 'خطایی رخ داد.',
+            icon: 'error',
+            confirmButtonText: 'بستن',
+            confirmButtonColor: '#ef4444',
+            customClass: { popup: 'rounded-2xl font-sans' }
+          });
+        }
+      } catch (err: any) {
+        Swal.fire({
+          title: 'خطای غیرمنتظره',
+          text: err.message,
+          icon: 'error',
+          confirmButtonText: 'بستن',
+          confirmButtonColor: '#ef4444',
+          customClass: { popup: 'rounded-2xl font-sans' }
+        });
+      }
+    }
+  };
+
+  useEffect(() => {
+    if (activeSubTab === 'database') {
+      loadTestMovies();
+    }
+  }, [activeSubTab]);
+
   useEffect(() => {
     loadSettings();
 
@@ -153,6 +330,7 @@ export default function SettingsPage({ onSettingsChange, onLogout }: SettingsPag
     setPathBackups(s.defaultPaths.backups);
     setPageSize(s.pageSize);
     setTheme(s.theme);
+    setVideoPlayerMode(s.videoPlayerMode || 'internal');
     setDefaultMoviePrice(s.defaultMoviePrice !== undefined ? s.defaultMoviePrice : 2000);
     setDefaultSeriesPrice(s.defaultSeriesPrice !== undefined ? s.defaultSeriesPrice : 1500);
     setDefaultQuality(s.defaultQuality || '1080p BluRay');
@@ -384,6 +562,7 @@ export default function SettingsPage({ onSettingsChange, onLogout }: SettingsPag
       defaultMoviePrice: Number(defaultMoviePrice) || 2000,
       defaultSeriesPrice: Number(defaultSeriesPrice) || 1500,
       defaultQuality,
+      videoPlayerMode,
       shopName,
       shopAddress,
       shopPhone,
@@ -963,6 +1142,43 @@ export default function SettingsPage({ onSettingsChange, onLogout }: SettingsPag
                   </div>
                 </div>
 
+                {/* Video Player Selection */}
+                <div className="p-4 bg-amber-500/5 dark:bg-slate-800/40 border border-amber-200/40 dark:border-slate-800 rounded-xl space-y-3 mt-4" id="video-player-setting-container">
+                  <div className="flex items-center gap-2">
+                    <Play className="w-4 h-4 text-amber-500 animate-pulse" />
+                    <strong className="text-xs font-black text-amber-700 dark:text-amber-400 block">پخش‌کننده ویدئوی پیش‌فرض (Video Player)</strong>
+                  </div>
+                  <p className="text-[10px] text-gray-400 leading-relaxed">
+                    انتخاب کنید که ویدئوها و قسمت‌های سریال چطور پخش شوند. می‌توانید از پخش‌کننده داخلی فوق پیشرفته HTML5 با قابلیت زیرنویس و تنظیمات سرعت استفاده کنید یا به برنامه‌های پیش‌فرض سیستم (مانند VLC, PotPlayer, KMPlayer و...) بفرستید.
+                  </p>
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 pt-1">
+                    <button
+                      type="button"
+                      onClick={() => setVideoPlayerMode('internal')}
+                      className={`h-10 rounded-lg font-bold text-xs border transition-all cursor-pointer flex items-center justify-center gap-2 ${
+                        videoPlayerMode === 'internal'
+                          ? 'bg-amber-500 border-amber-500 text-white shadow-sm'
+                          : 'bg-white dark:bg-slate-800 border-gray-200 dark:border-gray-700 text-gray-600 dark:text-gray-300 hover:bg-gray-50'
+                      }`}
+                    >
+                      <Play className="w-3.5 h-3.5 fill-current" />
+                      <span>پخش‌کننده داخلی زیبای برنامه (Internal)</span>
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => setVideoPlayerMode('external')}
+                      className={`h-10 rounded-lg font-bold text-xs border transition-all cursor-pointer flex items-center justify-center gap-2 ${
+                        videoPlayerMode === 'external'
+                          ? 'bg-amber-500 border-amber-500 text-white shadow-sm'
+                          : 'bg-white dark:bg-slate-800 border-gray-200 dark:border-gray-700 text-gray-600 dark:text-gray-300 hover:bg-gray-50'
+                      }`}
+                    >
+                      <Folder className="w-3.5 h-3.5" />
+                      <span>ارسال به پلیر پیش‌فرض سیستم (External)</span>
+                    </button>
+                  </div>
+                </div>
+
                 {/* Shop Information Section */}
                 <div className="border-t border-gray-150 dark:border-gray-800 pt-4 mt-4 space-y-4">
                   <div>
@@ -1299,6 +1515,188 @@ export default function SettingsPage({ onSettingsChange, onLogout }: SettingsPag
                   <Trash2 className="w-4 h-4" />
                   <span>ریست کارخانه و پاکسازی کامل پایگاه داده</span>
                 </button>
+              </div>
+
+              {/* SQLite Test and Validation Panel merged from DBTest.tsx */}
+              <div className="border-t border-gray-150 dark:border-gray-800 pt-5 mt-5 space-y-4">
+                <div>
+                  <h4 className="text-xs font-black text-indigo-650 dark:text-indigo-400">تست عملکرد و ثبت رکوردهای تستی</h4>
+                  <p className="text-[10px] text-gray-400 mt-0.5">درج مستقیم داده در جدول فیلم‌ها برای بررسی سلامت کامل خواندن و نوشتن فایل دیتابیس بومی</p>
+                </div>
+
+                <div className="grid grid-cols-1 lg:grid-cols-12 gap-6">
+                  {/* Save Test Record Form */}
+                  <form onSubmit={handleSaveTestRecord} className="lg:col-span-5 bg-slate-50 dark:bg-slate-900/40 rounded-xl border border-gray-150 dark:border-gray-800 p-4 space-y-4">
+                    <div className="flex items-center gap-2 border-b border-gray-105 dark:border-gray-800 pb-2.5">
+                      <Plus className="w-4 h-4 text-emerald-500" />
+                      <strong className="text-xs font-black text-gray-800 dark:text-gray-200">افزودن و اعتبارسنجی در SQLite</strong>
+                    </div>
+
+                    <div className="space-y-3">
+                      <div>
+                        <label className="text-[10px] font-bold text-gray-400 block mb-1">عنوان فارسی فیلم آزمایشی (الزامی):</label>
+                        <input
+                          type="text"
+                          placeholder="مثال: رستگاری در شاوشنک"
+                          value={titleFa}
+                          onChange={(e) => setTitleFa(e.target.value)}
+                          className="w-full h-9 px-3 bg-white dark:bg-slate-950 border border-gray-250 dark:border-gray-800 rounded-lg text-xs font-semibold focus:border-indigo-500 outline-none transition-all"
+                        />
+                      </div>
+
+                      <div className="grid grid-cols-2 gap-3">
+                        <div>
+                          <label className="text-[10px] font-bold text-gray-400 block mb-1">عنوان انگلیسی:</label>
+                          <input
+                            type="text"
+                            placeholder="The Shawshank"
+                            value={titleEn}
+                            onChange={(e) => setTitleEn(e.target.value)}
+                            className="w-full h-9 px-3 bg-white dark:bg-slate-950 border border-gray-250 dark:border-gray-800 rounded-lg text-xs font-semibold focus:border-indigo-500 outline-none transition-all text-left font-mono"
+                            dir="ltr"
+                          />
+                        </div>
+                        <div>
+                          <label className="text-[10px] font-bold text-gray-400 block mb-1">کارگردان:</label>
+                          <input
+                            type="text"
+                            placeholder="فرانک دارابونت"
+                            value={director}
+                            onChange={(e) => setDirector(e.target.value)}
+                            className="w-full h-9 px-3 bg-white dark:bg-slate-950 border border-gray-250 dark:border-gray-800 rounded-lg text-xs font-semibold focus:border-indigo-500 outline-none transition-all"
+                          />
+                        </div>
+                      </div>
+
+                      <div className="grid grid-cols-2 gap-3">
+                        <div>
+                          <label className="text-[10px] font-bold text-gray-400 block mb-1">سال انتشار:</label>
+                          <input
+                            type="text"
+                            placeholder="1994"
+                            value={year}
+                            onChange={(e) => setYear(e.target.value)}
+                            className="w-full h-9 px-3 bg-white dark:bg-slate-950 border border-gray-250 dark:border-gray-800 rounded-lg text-xs font-semibold focus:border-indigo-500 outline-none transition-all text-left font-mono"
+                            dir="ltr"
+                          />
+                        </div>
+                        <div>
+                          <label className="text-[10px] font-bold text-gray-400 block mb-1">ژانر رسانه:</label>
+                          <select
+                            value={category}
+                            onChange={(e) => setCategory(e.target.value)}
+                            className="w-full h-9 px-3 bg-white dark:bg-slate-950 border border-gray-250 dark:border-gray-800 rounded-lg text-xs font-semibold focus:border-indigo-500 outline-none transition-all cursor-pointer"
+                          >
+                            <option value="اکشن">اکشن</option>
+                            <option value="درام">درام</option>
+                            <option value="جنایی">جنایی</option>
+                            <option value="کمدی">کمدی</option>
+                            <option value="فانتزی">فانتزی</option>
+                          </select>
+                        </div>
+                      </div>
+
+                      <div className="grid grid-cols-2 gap-3">
+                        <div>
+                          <label className="text-[10px] font-bold text-gray-400 block mb-1">قیمت فروش آزمایشی:</label>
+                          <input
+                            type="number"
+                            placeholder="2500"
+                            value={salePrice}
+                            onChange={(e) => setSalePrice(e.target.value)}
+                            className="w-full h-9 px-3 bg-white dark:bg-slate-950 border border-gray-250 dark:border-gray-800 rounded-lg text-xs font-semibold focus:border-indigo-500 outline-none transition-all font-mono"
+                          />
+                        </div>
+                        <div>
+                          <label className="text-[10px] font-bold text-gray-400 block mb-1">مسیر فایل ویدئویی:</label>
+                          <input
+                            type="text"
+                            value={filePath}
+                            onChange={(e) => setFilePath(e.target.value)}
+                            className="w-full h-9 px-3 bg-white dark:bg-slate-950 border border-gray-250 dark:border-gray-800 rounded-lg text-xs font-semibold focus:border-indigo-500 outline-none transition-all text-left font-mono"
+                            dir="ltr"
+                          />
+                        </div>
+                      </div>
+
+                      <button
+                        type="submit"
+                        disabled={!sqliteAvailable}
+                        className="w-full h-10 bg-gradient-to-r from-emerald-600 to-teal-500 hover:from-emerald-700 hover:to-teal-600 text-white rounded-lg text-xs font-black shadow-md cursor-pointer flex items-center justify-center gap-1.5 transition-all disabled:opacity-50"
+                      >
+                        <Plus className="w-4 h-4" />
+                        <span>ذخیره آزمایشی در SQLite</span>
+                      </button>
+                    </div>
+                  </form>
+
+                  {/* Live List View of last 10 records */}
+                  <div className="lg:col-span-7 bg-slate-50 dark:bg-slate-900/40 rounded-xl border border-gray-150 dark:border-gray-800 p-4 flex flex-col">
+                    <div className="flex items-center justify-between border-b border-gray-105 dark:border-gray-800 pb-2.5 mb-3">
+                      <div className="flex items-center gap-2">
+                        <FileText className="w-4 h-4 text-amber-500" />
+                        <strong className="text-xs font-black text-gray-800 dark:text-gray-200">مشاهده زنده ۱۰ رکورد آخر دیتابیس</strong>
+                      </div>
+                      <button
+                        onClick={loadTestMovies}
+                        disabled={loadingMovies || !sqliteAvailable}
+                        className="p-1.5 bg-white dark:bg-slate-950 hover:bg-gray-100 dark:hover:bg-slate-900 rounded-lg text-gray-500 dark:text-gray-400 cursor-pointer disabled:opacity-50"
+                        title="بارگیری مجدد از دیتابیس"
+                      >
+                        <RefreshCw className={`w-3.5 h-3.5 ${loadingMovies ? 'animate-spin' : ''}`} />
+                      </button>
+                    </div>
+
+                    <div className="flex-1 overflow-auto max-h-[300px] border border-gray-200 dark:border-gray-800 rounded-lg bg-white dark:bg-slate-950">
+                      {moviesList.length === 0 ? (
+                        <div className="text-center py-12 text-xs text-gray-400 font-bold space-y-2">
+                          <Database className="w-8 h-8 text-gray-300 mx-auto" />
+                          <p>هیچ رکوردی یافت نشد یا دیتابیس در مرورگر است.</p>
+                          <p className="text-[9.5px] text-gray-450">یک فیلم آزمایشی از فرم سمت راست ثبت کنید.</p>
+                        </div>
+                      ) : (
+                        <table className="w-full text-right border-collapse text-[10.5px]">
+                          <thead>
+                            <tr className="bg-slate-100 dark:bg-slate-900 text-gray-500 dark:text-gray-400 border-b border-gray-200 dark:border-gray-800">
+                              <th className="p-2.5 font-extrabold">عنوان فارسی / انگلیسی</th>
+                              <th className="p-2.5 font-extrabold">ژانر</th>
+                              <th className="p-2.5 font-extrabold">قیمت</th>
+                              <th className="p-2.5 font-extrabold text-left">عملیات</th>
+                            </tr>
+                          </thead>
+                          <tbody className="divide-y divide-gray-150 dark:divide-gray-800">
+                            {moviesList.map((movie: any) => (
+                              <tr key={movie.id} className="hover:bg-slate-50/50 dark:hover:bg-slate-900/30 transition-colors">
+                                <td className="p-2.5">
+                                  <div className="font-bold text-gray-800 dark:text-gray-100">{movie.titleFa}</div>
+                                  <div className="text-[9px] text-gray-400 font-mono mt-0.5" dir="ltr">{movie.titleEn || '-'}</div>
+                                </td>
+                                <td className="p-2.5">
+                                  <span className="bg-indigo-50 dark:bg-indigo-950/40 text-indigo-650 dark:text-indigo-400 px-1.5 py-0.5 rounded font-black text-[9px]">
+                                    {movie.category || 'ندارد'}
+                                  </span>
+                                </td>
+                                <td className="p-2.5 text-gray-700 dark:text-gray-300 font-mono font-bold">
+                                  {toPersianNums(movie.salePrice)} تومان
+                                </td>
+                                <td className="p-2.5 text-left">
+                                  <button
+                                    onClick={() => handleDeleteTestRecord(movie.id)}
+                                    className="p-1 text-red-500 hover:bg-red-50 dark:hover:bg-red-950/20 rounded-md cursor-pointer transition-all inline-flex items-center gap-1"
+                                    title="حذف از دیتابیس بومی"
+                                  >
+                                    <Trash2 className="w-3.5 h-3.5" />
+                                    <span className="text-[8.5px] font-black">حذف</span>
+                                  </button>
+                                </td>
+                              </tr>
+                            ))}
+                          </tbody>
+                        </table>
+                      )}
+                    </div>
+                  </div>
+                </div>
               </div>
 
             </div>

@@ -32,6 +32,7 @@ export interface Movie {
   originPeerIp?: string; // LAN IP of the system this movie is stored on
   isPeerMedia?: boolean; // True if this movie belongs to a peer computer (System 2)
   collectionName?: string; // Optional collection name (e.g., "Lord Of The Rings")
+  subtitlesList?: string[]; // Array of subtitle file paths
 }
 
 export interface Episode {
@@ -40,6 +41,7 @@ export interface Episode {
   name: string;
   videoPath: string;
   description: string;
+  subtitlesList?: string[]; // Array of subtitle file paths for this episode
 }
 
 export interface Season {
@@ -166,6 +168,7 @@ export interface AppSettings {
   tmdbReadAccessToken?: string;
   tmdbLanguage?: string;
   tmdbIncludeAdult?: boolean;
+  videoPlayerMode?: 'internal' | 'external';
 }
 
 declare global {
@@ -195,6 +198,10 @@ declare global {
       getLocalIps?: () => Promise<string[]>;
       downloadLanFile?: (url: string, destPath: string) => Promise<{ success: boolean; error?: string }>;
       copyFileToUsb?: (sourcePath: string, destDir: string, id: string) => Promise<{ success: boolean; destPath?: string; error?: string }>;
+      findMatchingSubtitles?: (videoPath: string) => Promise<{ success: boolean; subtitles?: string[]; error?: string }>;
+      readTextFile?: (filepath: string) => Promise<{ success: boolean; content?: string; error?: string }>;
+      exportSqliteDb?: (destPath: string) => Promise<{ success: boolean; error?: string }>;
+      importSqliteDb?: (srcPath: string) => Promise<{ success: boolean; error?: string }>;
       onCopyProgress?: (callback: (data: { id: string; progress: number; bytesCopied: number; totalBytes: number; speedMbs: number; completed?: boolean; error?: string }) => void) => void;
       onDownloadProgress?: (callback: (data: any) => void) => void;
     };
