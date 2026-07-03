@@ -588,7 +588,7 @@ export default function WarehouseManagement() {
     }
   };
 
-  const fetchStocks = async (warehouseId: number) => {
+  const fetchStocks = async (warehouseId: any) => {
     try {
       if (window.electronAPI?.getWarehouseStocks) {
         const data = await window.electronAPI.getWarehouseStocks(warehouseId);

@@ -2404,7 +2404,7 @@ ipcMain.handle('download-lan-file', async (event, url, destPath) => {
 });
 
 // IPC handle for Copying Media File to USB Flash/HDD Drive with real progress
-ipcMain.handle('copy-file-to-usb', async (event, { sourcePath, destDir, id }) => {
+ipcMain.handle('copy-file-to-usb', async (event, { sourcePath, destDir, id, customRelativePath }) => {
   return new Promise((resolve) => {
     try {
       if (!sourcePath || !fs.existsSync(sourcePath)) {
@@ -2416,16 +2416,28 @@ ipcMain.handle('copy-file-to-usb', async (event, { sourcePath, destDir, id }) =>
         return resolve({ success: false, error: 'مسیر انتخاب شده یک پوشه است، کپی مستقیم فایل الزامی است.' });
       }
 
-      if (!fs.existsSync(destDir)) {
-        try {
-          fs.mkdirSync(destDir, { recursive: true });
-        } catch (e) {
-          return resolve({ success: false, error: 'خطا در ایجاد پوشه مقصد روی فلش: ' + e.message });
+      let destPath;
+      if (customRelativePath) {
+        destPath = path.join(destDir, customRelativePath);
+        const containingDir = path.dirname(destPath);
+        if (!fs.existsSync(containingDir)) {
+          try {
+            fs.mkdirSync(containingDir, { recursive: true });
+          } catch (e) {
+            return resolve({ success: false, error: 'خطا در ایجاد پوشه زیرمجموعه مقصد روی فلش: ' + e.message });
+          }
         }
+      } else {
+        if (!fs.existsSync(destDir)) {
+          try {
+            fs.mkdirSync(destDir, { recursive: true });
+          } catch (e) {
+            return resolve({ success: false, error: 'خطا در ایجاد پوشه مقصد روی فلش: ' + e.message });
+          }
+        }
+        const filename = path.basename(sourcePath);
+        destPath = path.join(destDir, filename);
       }
-
-      const filename = path.basename(sourcePath);
-      const destPath = path.join(destDir, filename);
 
       const readStream = fs.createReadStream(sourcePath);
       const writeStream = fs.createWriteStream(destPath);
@@ -2499,6 +2511,22 @@ ipcMain.handle('copy-file-to-usb', async (event, { sourcePath, destDir, id }) =>
       resolve({ success: false, error: 'خطای سیستمی کپی فایل: ' + err.message });
     }
   });
+});
+
+// IPC handle for saving invoice image to USB
+ipcMain.handle('save-invoice-image', async (event, { destDir, base64Data, filename }) => {
+  try {
+    if (!fs.existsSync(destDir)) {
+      fs.mkdirSync(destDir, { recursive: true });
+    }
+    const destPath = path.join(destDir, filename);
+    const data = base64Data.replace(/^data:image\/\w+;base64,/, "");
+    const buffer = Buffer.from(data, 'base64');
+    fs.writeFileSync(destPath, buffer);
+    return { success: true, destPath };
+  } catch (err) {
+    return { success: false, error: err.message };
+  }
 });
 
 // Find matching subtitles automatically in the same directory as a video file

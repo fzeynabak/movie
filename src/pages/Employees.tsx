@@ -236,7 +236,7 @@ export default function Employees() {
     }
   };
 
-  const fetchTransactions = async (empId: number) => {
+  const fetchTransactions = async (empId: any) => {
     try {
       if (window.electronAPI?.getEmployeeTransactions) {
         const txs = await window.electronAPI.getEmployeeTransactions(empId);

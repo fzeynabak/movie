@@ -11,6 +11,7 @@ import { showToast } from './utils/toast';
 import Dashboard from './pages/Dashboard';
 import Movies from './pages/Movies';
 import SeriesPage from './pages/Series';
+import Downloads from './pages/Downloads';
 import SalesPage from './pages/Sales';
 import SettingsPage from './pages/Settings';
 import ContactUs from './pages/ContactUs';
@@ -39,7 +40,8 @@ import {
   Minus,
   Square,
   Lock,
-  LogOut
+  LogOut,
+  Download
 } from 'lucide-react';
 
 export default function App() {
@@ -407,16 +409,69 @@ export default function App() {
   }
 
   const menuItems = [
-    { id: 'dashboard', label: 'داشبورد / پیش‌خوان', icon: LayoutDashboard },
-    { id: 'movies', label: 'مدیریت فیلم‌ها', icon: Film },
-    { id: 'series', label: 'مدیریت سریال‌ها', icon: Tv },
-    { id: 'sales', label: 'فروش و مدیریت مالی', icon: CreditCard },
-    { id: 'settings', label: 'تنظیمات مدیا سنتر', icon: SettingsIcon },
-    { id: 'contact', label: 'ارتباط با ما و پشتیبانی', icon: HelpCircle },
+    { 
+      id: 'dashboard', 
+      label: 'داشبورد / پیش‌خوان', 
+      icon: LayoutDashboard,
+      activeClass: 'bg-slate-700 dark:bg-slate-800 text-white shadow-lg shadow-slate-700/15',
+      iconColor: 'text-slate-500 dark:text-slate-450',
+      activeIconColor: 'text-white'
+    },
+    { 
+      id: 'movies', 
+      label: 'مدیریت فیلم‌ها', 
+      icon: Film,
+      activeClass: 'bg-gradient-to-r from-amber-500 to-rose-500 text-white shadow-lg shadow-rose-500/20',
+      iconColor: 'text-rose-500 dark:text-rose-400',
+      activeIconColor: 'text-white',
+      badge: 'فیلم'
+    },
+    { 
+      id: 'series', 
+      label: 'مدیریت سریال‌ها', 
+      icon: Tv,
+      activeClass: 'bg-gradient-to-r from-violet-600 to-indigo-600 text-white shadow-lg shadow-indigo-600/20',
+      iconColor: 'text-indigo-500 dark:text-indigo-400',
+      activeIconColor: 'text-white',
+      badge: 'سریال'
+    },
+    { 
+      id: 'downloads', 
+      label: 'مدیریت دانلودها (IDM)', 
+      icon: Download,
+      activeClass: 'bg-gradient-to-r from-emerald-500 to-teal-500 text-white shadow-lg shadow-emerald-500/20',
+      iconColor: 'text-emerald-500 dark:text-emerald-400',
+      activeIconColor: 'text-white',
+      badge: 'IDM'
+    },
+    { 
+      id: 'sales', 
+      label: 'فروش و مدیریت مالی', 
+      icon: CreditCard,
+      activeClass: 'bg-indigo-600 text-white shadow-lg shadow-indigo-600/15',
+      iconColor: 'text-blue-500 dark:text-blue-400',
+      activeIconColor: 'text-white'
+    },
+    { 
+      id: 'settings', 
+      label: 'تنظیمات مدیا سنتر', 
+      icon: SettingsIcon,
+      activeClass: 'bg-gray-800 dark:bg-gray-700 text-white shadow-lg shadow-gray-800/15',
+      iconColor: 'text-gray-500 dark:text-gray-405',
+      activeIconColor: 'text-white'
+    },
+    { 
+      id: 'contact', 
+      label: 'ارتباط با ما و پشتیبانی', 
+      icon: HelpCircle,
+      activeClass: 'bg-teal-600 text-white shadow-lg shadow-teal-600/15',
+      iconColor: 'text-teal-500 dark:text-teal-400',
+      activeIconColor: 'text-white'
+    },
   ];
 
   return (
-    <div className="min-h-screen bg-gray-50 dark:bg-[#0f172a] text-gray-800 dark:text-gray-100 font-sans flex flex-col selection:bg-indigo-500 selection:text-white" dir="rtl" id="app-root-shell">
+    <div className="h-screen max-h-screen bg-gray-50 dark:bg-[#0f172a] text-gray-800 dark:text-gray-100 font-sans flex flex-col selection:bg-indigo-500 selection:text-white overflow-hidden" dir="rtl" id="app-root-shell">
       
       {/* 1. Desktop Menubar (Continuous Frameless window bar with drag & drop support) */}
       <header 
@@ -566,16 +621,31 @@ export default function App() {
                   <button
                     key={item.id}
                     onClick={() => setActiveTab(item.id as any)}
-                    className={`w-full flex items-center justify-center lg:justify-start gap-3 lg:px-3 px-0 h-11 text-xs font-bold rounded-xl transition-all cursor-pointer ${
+                    className={`w-full flex items-center justify-between lg:justify-start gap-3 lg:px-3.5 px-0 h-11 text-[11.5px] font-bold rounded-xl transition-all duration-300 cursor-pointer border ${
                       isActive 
-                        ? 'bg-indigo-600 text-white shadow-lg shadow-indigo-600/10' 
-                        : 'text-gray-600 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-slate-800/60'
+                        ? `${item.activeClass} border-transparent` 
+                        : 'text-gray-600 dark:text-gray-300 hover:bg-gray-100/80 dark:hover:bg-slate-800/50 border-transparent hover:border-gray-200/40 dark:hover:border-slate-750'
                     }`}
                     id={`nav-link-${item.id}`}
                     title={item.label}
                   >
-                    <Icon className={`w-4.5 h-4.5 shrink-0 ${isActive ? 'text-white' : 'text-gray-400 dark:text-gray-450'}`} />
-                    <span className="lg:block md:hidden overflow-hidden truncate">{item.label}</span>
+                    <div className="flex items-center gap-3">
+                      <Icon className={`w-4.5 h-4.5 shrink-0 transition-transform duration-300 ${isActive ? 'scale-110 ' + item.activeIconColor : item.iconColor}`} />
+                      <span className="lg:block md:hidden overflow-hidden truncate">{item.label}</span>
+                    </div>
+                    {item.badge && (
+                      <span className={`lg:block md:hidden text-[9px] px-1.5 py-0.5 rounded-md font-extrabold ${
+                        isActive 
+                          ? 'bg-white/20 text-white animate-pulse' 
+                          : item.id === 'movies'
+                            ? 'bg-rose-500/10 text-rose-500'
+                            : item.id === 'series'
+                              ? 'bg-indigo-500/10 text-indigo-500'
+                              : 'bg-emerald-500/10 text-emerald-500'
+                      }`}>
+                        {item.badge}
+                      </span>
+                    )}
                   </button>
                 );
               })}
@@ -687,6 +757,7 @@ export default function App() {
                 onClearInitialSelectedId={() => setActiveMediaId(null)}
               />
             )}
+            {activeTab === 'downloads' && <Downloads />}
             {activeTab === 'sales' && <SalesPage />}
             {activeTab === 'settings' && (
               <SettingsPage 

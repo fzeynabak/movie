@@ -74,6 +74,7 @@ export default function SettingsPage({ onSettingsChange, onLogout }: SettingsPag
   const [defaultSeriesPrice, setDefaultSeriesPrice] = useState(1500);
   const [defaultQuality, setDefaultQuality] = useState('1080p BluRay');
   const [lanEnabled, setLanEnabled] = useState(true);
+  const [saveInvoiceToUsbEnabled, setSaveInvoiceToUsbEnabled] = useState(true);
 
   // Shop Info
   const [shopName, setShopName] = useState('');
@@ -335,6 +336,7 @@ export default function SettingsPage({ onSettingsChange, onLogout }: SettingsPag
     setDefaultSeriesPrice(s.defaultSeriesPrice !== undefined ? s.defaultSeriesPrice : 1500);
     setDefaultQuality(s.defaultQuality || '1080p BluRay');
     setLanEnabled(s.lanEnabled !== undefined ? s.lanEnabled : true);
+    setSaveInvoiceToUsbEnabled(s.saveInvoiceToUsbEnabled !== undefined ? s.saveInvoiceToUsbEnabled : true);
     setShopName(s.shopName || '');
     setShopAddress(s.shopAddress || '');
     setShopPhone(s.shopPhone || '');
@@ -567,7 +569,8 @@ export default function SettingsPage({ onSettingsChange, onLogout }: SettingsPag
       shopAddress,
       shopPhone,
       shopPhoneSecondary,
-      lanEnabled: !!lanEnabled
+      lanEnabled: !!lanEnabled,
+      saveInvoiceToUsbEnabled: !!saveInvoiceToUsbEnabled
     });
     setSettings(updated);
     onSettingsChange(updated);
@@ -1138,6 +1141,26 @@ export default function SettingsPage({ onSettingsChange, onLogout }: SettingsPag
                         id="lan-toggle-checkbox"
                       />
                       <div className="w-11 h-6 bg-gray-200 dark:bg-slate-700 peer-focus:outline-none rounded-full peer peer-checked:after:-translate-x-5 peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:right-[2px] after:bg-white after:border-gray-300 after:border after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-indigo-600"></div>
+                    </label>
+                  </div>
+                </div>
+
+                {/* Auto Invoice save to USB switcher */}
+                <div className="p-4 bg-emerald-550/5 dark:bg-slate-800/40 border border-emerald-100/40 dark:border-slate-800 rounded-xl space-y-2 mt-4" id="save-invoice-setting-container">
+                  <div className="flex items-center justify-between">
+                    <div>
+                      <strong className="text-xs font-black text-emerald-600 dark:text-emerald-400 block">ذخیره خودکار تصویر فاکتور در فلش مشتری</strong>
+                      <span className="text-[10px] text-gray-400 block mt-0.5">در صورت فعال بودن، تصویر زیبای فاکتور سینمایی هنگام ثبت نهایی به صورت خودکار در فلش مشتری ذخیره می‌شود.</span>
+                    </div>
+                    <label className="relative inline-flex items-center cursor-pointer select-none">
+                      <input 
+                        type="checkbox" 
+                        checked={saveInvoiceToUsbEnabled}
+                        onChange={(e) => setSaveInvoiceToUsbEnabled(e.target.checked)}
+                        className="sr-only peer"
+                        id="save-invoice-usb-toggle"
+                      />
+                      <div className="w-11 h-6 bg-gray-200 dark:bg-slate-700 peer-focus:outline-none rounded-full peer peer-checked:after:-translate-x-5 peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:right-[2px] after:bg-white after:border-gray-300 after:border after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-emerald-600"></div>
                     </label>
                   </div>
                 </div>

@@ -779,8 +779,7 @@ export default function Movies({
     setShowFormModal(true);
   };
 
-  const handleOpenCreate = () => {
-    setEditingMovie(null);
+  const clearFormFields = () => {
     setFormCategory('ایرانی');
     setFormTitleFa('');
     setFormTitleEn('');
@@ -803,6 +802,13 @@ export default function Movies({
     setFormGallery('');
     setFormCollectionName('');
     setFormSubtitlesList([]);
+  };
+
+  const handleOpenCreate = () => {
+    if (editingMovie !== null) {
+      clearFormFields();
+    }
+    setEditingMovie(null);
     setShowFormModal(true);
   };
 
@@ -1016,6 +1022,7 @@ export default function Movies({
     }
 
     setShowFormModal(false);
+    clearFormFields();
     refreshData();
   };
 
@@ -1054,49 +1061,44 @@ export default function Movies({
     }
   };
 
-  // Open Direct Sale Dialog 💰
+  // Open Direct Sale Dialog 💰 - Simplified to directly add to cart for movies
   const handleOpenSale = (movie: Movie, e: React.MouseEvent) => {
     e.stopPropagation();
-    setSellingMovie(movie);
     const settings = dbService.getSettings();
-    setSalePrice(settings.defaultMoviePrice || 2000);
-    setSaleDiscount(0);
-  };
-
-  const handleRegisterSale = (e: React.FormEvent) => {
-    e.preventDefault();
-    if (!sellingMovie) return;
-
+    const defaultPrice = settings.defaultMoviePrice || movie.salePrice || 2000;
+    
     if (onAddToCart) {
       onAddToCart({
-        mediaId: sellingMovie.id,
-        mediaTitle: sellingMovie.titleFa,
+        mediaId: movie.id,
+        mediaTitle: movie.titleFa,
         mediaType: 'movie',
         salesType: 'movie',
-        details: `فیلم سینمایی (${sellingMovie.quality})`,
-        purchasePrice: sellingMovie.purchasePrice,
-        salePrice: Math.max(salePrice - saleDiscount, 0),
-        filePath: sellingMovie.filePath,
-        videoPaths: [sellingMovie.filePath]
+        details: `فیلم سینمایی (${movie.quality || 'HD'})`,
+        purchasePrice: movie.purchasePrice || 0,
+        salePrice: defaultPrice,
+        filePath: movie.filePath,
+        videoPaths: [movie.filePath]
       });
-      setSellingMovie(null);
+      showToast(`فیلم "${movie.titleFa}" به سبد خرید اضافه شد.`, 'success');
       return;
     }
 
     dbService.addSale({
       customerName: 'مشتری متفرقه دفتری',
-      mediaId: sellingMovie.id,
-      mediaTitle: sellingMovie.titleFa,
+      mediaId: movie.id,
+      mediaTitle: movie.titleFa,
       mediaType: 'movie',
       salesType: 'movie',
       details: 'فروش مستقیم فیلم',
-      purchasePrice: sellingMovie.purchasePrice,
-      salePrice: Number(salePrice) || sellingMovie.salePrice,
-      discount: Number(saleDiscount) || 0
+      purchasePrice: movie.purchasePrice || 0,
+      salePrice: defaultPrice,
+      discount: 0
     });
-
-    setSellingMovie(null);
     alert('تراکنش فروش با موفقیت به دیتابیس مالی افزوده شد.');
+  };
+
+  const handleRegisterSale = (e: React.FormEvent) => {
+    e.preventDefault();
   };
 
   // Helper to convert Persian numerals to English numerals

@@ -8,6 +8,7 @@ import { dbService } from '../db/databaseService';
 import { CartItem, Sale, CustomerSession } from '../types';
 import { toPersianNums, formatCurrency } from '../pages/Dashboard';
 import { showToast, showAlert, showConfirm } from '../utils/toast';
+import { generateCinemaInvoiceImage } from '../utils/CinemaInvoiceGenerator';
 import { 
   Users, 
   ShoppingCart, 
@@ -71,6 +72,7 @@ export default function CartBar({
   const [suggestedCustomers, setSuggestedCustomers] = useState<string[]>([]);
   const [discountInput, setDiscountInput] = useState<number>(0);
   const [customerSearchQuery, setCustomerSearchQuery] = useState('');
+  const [saveInvoiceLocal, setSaveInvoiceLocal] = useState(true);
 
   // Copy Progress State
   const [copyProgress, setCopyProgress] = useState<Record<string, {
@@ -82,40 +84,144 @@ export default function CartBar({
     error?: string;
   }>>({});
 
+  const [isCopyingAll, setIsCopyingAll] = useState(false);
+  const currentCopyIndicesRef = useRef<Record<string, { current: number; total: number }>>({});
+
   useEffect(() => {
     if (window.electronAPI && window.electronAPI.onCopyProgress) {
       window.electronAPI.onCopyProgress((data) => {
-        setCopyProgress(prev => ({
-          ...prev,
-          [data.id]: {
-            progress: data.progress,
-            bytesCopied: data.bytesCopied,
-            totalBytes: data.totalBytes,
-            speedMbs: data.speedMbs,
-            completed: !!data.completed,
-            error: data.error
+        setCopyProgress(prev => {
+          const indexInfo = currentCopyIndicesRef.current[data.id];
+          let displayProgress = data.progress;
+          let displayCompleted = data.completed;
+          
+          if (indexInfo && indexInfo.total > 1) {
+            const currentFileIndex = indexInfo.current;
+            const totalFiles = indexInfo.total;
+            displayProgress = Math.round(((currentFileIndex * 100) + data.progress) / totalFiles);
+            displayCompleted = data.completed && (currentFileIndex === totalFiles - 1);
           }
-        }));
+          
+          return {
+            ...prev,
+            [data.id]: {
+              progress: displayProgress,
+              bytesCopied: data.bytesCopied,
+              totalBytes: data.totalBytes,
+              speedMbs: data.speedMbs,
+              completed: !!displayCompleted,
+              error: data.error
+            }
+          };
+        });
       });
     }
   }, []);
 
-  const handleCopyFileToUsb = async (itemId: string, sourcePath: string, mediaTitle: string) => {
+  const cleanTitleForFilename = (title: string): string => {
+    if (!title) return 'media';
+    return title
+      .toLowerCase()
+      .replace(/[^\w\s\u0600-\u06FF-]/g, '') // Keep English, Persian characters, digits, spaces, and hyphens
+      .trim()
+      .replace(/\s+/g, '-'); // Replace spaces with hyphens
+  };
+
+  const cleanFolderName = (name: string): string => {
+    if (!name) return 'Folder';
+    return name.replace(/[\\/:*?"<>|]/g, '').trim();
+  };
+
+  const getCopyDestinationRelativePath = (item: CartItem, sourcePath: string): string => {
+    const ext = sourcePath.substring(sourcePath.lastIndexOf('.')) || '.mkv';
+    
+    if (item.mediaType === 'series') {
+      const series = dbService.getSeries().find(s => s.id === item.mediaId);
+      const rawFolderName = series ? (series.titleEn || series.titleFa) : item.mediaTitle;
+      const folderName = cleanFolderName(rawFolderName);
+      
+      let seasonNum = 1;
+      let episodeNum = 1;
+      let found = false;
+      
+      if (series && series.seasons) {
+        for (let sIdx = 0; sIdx < series.seasons.length; sIdx++) {
+          const season = series.seasons[sIdx];
+          let currentSeasonNum = sIdx + 1;
+          const sName = season.name;
+          const sMatch = sName.match(/\d+/);
+          if (sMatch) {
+            currentSeasonNum = parseInt(sMatch[0]);
+          } else {
+            if (sName.includes('اول')) currentSeasonNum = 1;
+            else if (sName.includes('دوم')) currentSeasonNum = 2;
+            else if (sName.includes('سوم')) currentSeasonNum = 3;
+            else if (sName.includes('چهارم')) currentSeasonNum = 4;
+            else if (sName.includes('پنجم')) currentSeasonNum = 5;
+            else if (sName.includes('ششم')) currentSeasonNum = 6;
+            else if (sName.includes('هفتم')) currentSeasonNum = 7;
+            else if (sName.includes('هشتم')) currentSeasonNum = 8;
+            else if (sName.includes('نهم')) currentSeasonNum = 9;
+            else if (sName.includes('دهم')) currentSeasonNum = 10;
+          }
+          
+          for (const ep of season.episodes) {
+            if (ep.videoPath === sourcePath) {
+              seasonNum = currentSeasonNum;
+              episodeNum = ep.episodeNumber;
+              found = true;
+              break;
+            }
+          }
+          if (found) break;
+        }
+      }
+      
+      if (!found) {
+        const filename = sourcePath.substring(sourcePath.lastIndexOf('/') + 1).substring(sourcePath.lastIndexOf('\\') + 1);
+        const sMatch = filename.match(/[Ss](?:eason)?\s*[-_.]?\s*(\d+)/i);
+        const epMatch = filename.match(/[Ee](?:pisode)?\s*[-_.]?\s*(\d+)/i) || filename.match(/\b(\d+)\b/);
+        if (sMatch) seasonNum = parseInt(sMatch[1]);
+        if (epMatch) episodeNum = parseInt(epMatch[1]);
+      }
+      
+      const sStr = String(seasonNum).padStart(2, '0');
+      const eStr = String(episodeNum).padStart(2, '0');
+      
+      const cleanSeriesTitle = cleanTitleForFilename(series?.titleEn || series?.titleFa || item.mediaTitle);
+      const filename = `${cleanSeriesTitle}-s${sStr}e${eStr}${ext}`;
+      
+      return `${folderName}/${filename}`;
+    } else {
+      // Movie
+      const movie = dbService.getMovies().find(m => m.id === item.mediaId);
+      const rawFolderName = movie ? (movie.titleEn || movie.titleFa) : item.mediaTitle;
+      const folderName = cleanFolderName(rawFolderName);
+      
+      const cleanMovieTitle = cleanTitleForFilename(movie?.titleEn || movie?.titleFa || item.mediaTitle);
+      const filename = `${cleanMovieTitle}${ext}`;
+      
+      return `${folderName}/${filename}`;
+    }
+  };
+
+  const copyCartItemToUsb = async (item: CartItem): Promise<boolean> => {
     const activeSession = sessions.find(s => s.id === activeSessionId) || sessions[0];
     const destDir = activeSession.selectedDrivePath;
     if (!destDir) {
       showAlert('لطفاً ابتدا از بخش انتخاب مشتری، مسیر فلش دیسک (USB) مقصد را مشخص کنید.', 'warning', 'مسیر فلش انتخاب نشده');
-      return;
+      return false;
     }
-    if (!sourcePath) {
-      showAlert('مسیری برای فایل این فیلم ثبت نشده است. امکان کپی وجود ندارد.', 'error');
-      return;
+    
+    const pathsToCopy = item.videoPaths && item.videoPaths.length > 0 ? item.videoPaths : (item.filePath ? [item.filePath] : []);
+    if (pathsToCopy.length === 0) {
+      showAlert(`مسیری برای فایل‌های ${item.mediaTitle} ثبت نشده است. امکان کپی وجود ندارد.`, 'error');
+      return false;
     }
-
-    // Set initial loading state
+    
     setCopyProgress(prev => ({
       ...prev,
-      [itemId]: {
+      [item.id]: {
         progress: 0,
         bytesCopied: 0,
         totalBytes: 0,
@@ -123,71 +229,174 @@ export default function CartBar({
         completed: false
       }
     }));
-
+    
+    currentCopyIndicesRef.current[item.id] = { current: 0, total: pathsToCopy.length };
+    
     if (window.electronAPI && window.electronAPI.copyFileToUsb) {
-      try {
-        const res = await window.electronAPI.copyFileToUsb(sourcePath, destDir, itemId);
-        if (res && !res.success) {
-          setCopyProgress(prev => ({
-            ...prev,
-            [itemId]: {
-              ...prev[itemId],
-              completed: false,
-              error: res.error || 'خطای کپی فایل'
+      let copyCount = 0;
+      for (let i = 0; i < pathsToCopy.length; i++) {
+        const sourcePath = pathsToCopy[i];
+        currentCopyIndicesRef.current[item.id].current = i;
+        
+        const customRelativePath = getCopyDestinationRelativePath(item, sourcePath);
+        const absoluteDestPath = `${destDir}/${customRelativePath}`.replace(/\\/g, '/');
+        
+        let alreadyExists = false;
+        if (window.electronAPI.existsFile) {
+          try {
+            const checkRes = await window.electronAPI.existsFile(absoluteDestPath);
+            if (checkRes && checkRes.exists) {
+              alreadyExists = true;
             }
-          }));
-          showToast(`خطا در کپی ${mediaTitle}: ${res.error}`, 'error');
-        } else {
-          showToast(`فایل ${mediaTitle} با موفقیت به فلش منتقل شد!`, 'success');
-        }
-      } catch (err) {
-        setCopyProgress(prev => ({
-          ...prev,
-          [itemId]: {
-            ...prev[itemId],
-            completed: false,
-            error: (err as Error).message
+          } catch (err) {
+            console.error('Error checking file existence:', err);
           }
-        }));
-        showToast(`خطا در ارتباط کپی فایل: ${(err as Error).message}`, 'error');
-      }
-    } else {
-      // Browser Simulation Fallback!
-      showToast(`شبیه‌ساز مرورگر: کپی کردن فایل ${mediaTitle} به فلش دیسک آغاز شد...`, 'info');
-      let progress = 0;
-      const totalBytes = 1.2 * 1024 * 1024 * 1024; // 1.2 GB
-      const speedMbs = 38.5; // ~38 MB/s
-      
-      const interval = setInterval(() => {
-        progress += 15;
-        if (progress >= 100) {
-          progress = 100;
-          clearInterval(interval);
-          setCopyProgress(prev => ({
-            ...prev,
-            [itemId]: {
-              progress: 100,
-              bytesCopied: totalBytes,
-              totalBytes,
-              speedMbs: 0,
-              completed: true
-            }
-          }));
-          showToast(`[شبیه‌ساز] فایل ${mediaTitle} به پوشه مجازی فلش کپی شد!`, 'success');
-        } else {
-          setCopyProgress(prev => ({
-            ...prev,
-            [itemId]: {
-              progress,
-              bytesCopied: Math.round(totalBytes * (progress / 100)),
-              totalBytes,
-              speedMbs,
-              completed: false
-            }
-          }));
         }
-      }, 400);
+        
+        if (alreadyExists) {
+          const overallProgress = Math.round(((i * 100) + 100) / pathsToCopy.length);
+          const isOverallCompleted = (i === pathsToCopy.length - 1);
+          setCopyProgress(prev => ({
+            ...prev,
+            [item.id]: {
+              progress: overallProgress,
+              bytesCopied: 0,
+              totalBytes: 0,
+              speedMbs: 0,
+              completed: isOverallCompleted
+            }
+          }));
+          continue; // Skip copying since it already exists
+        }
+        
+        copyCount++;
+        try {
+          const res = await window.electronAPI.copyFileToUsb(sourcePath, destDir, item.id, customRelativePath);
+          if (res && !res.success) {
+            setCopyProgress(prev => ({
+              ...prev,
+              [item.id]: {
+                ...prev[item.id],
+                completed: false,
+                error: res.error || 'خطای کپی فایل'
+              }
+            }));
+            showToast(`خطا در کپی ${item.mediaTitle}: ${res.error}`, 'error');
+            return false;
+          }
+        } catch (err) {
+          setCopyProgress(prev => ({
+            ...prev,
+            [item.id]: {
+              ...prev[item.id],
+              completed: false,
+              error: (err as Error).message
+            }
+          }));
+          showToast(`خطا در ارتباط کپی فایل: ${(err as Error).message}`, 'error');
+          return false;
+        }
+      }
+      
+      setCopyProgress(prev => ({
+        ...prev,
+        [item.id]: {
+          ...prev[item.id],
+          progress: 100,
+          completed: true
+        }
+      }));
+      if (copyCount === 0) {
+        showToast(`رسانه ${item.mediaTitle} قبلاً کپی شده بود (رد شد).`, 'success');
+      } else {
+        showToast(`رسانه ${item.mediaTitle} با موفقیت به فلش منتقل شد!`, 'success');
+      }
+      return true;
+    } else {
+      showToast(`شبیه‌ساز مرورگر: کپی کردن فایل‌های ${item.mediaTitle} به فلش دیسک آغاز شد...`, 'info');
+      
+      for (let i = 0; i < pathsToCopy.length; i++) {
+        currentCopyIndicesRef.current[item.id].current = i;
+        await new Promise<void>((resolveSim) => {
+          let fileProgress = 0;
+          const totalBytes = 500 * 1024 * 1024;
+          const speedMbs = 45.2;
+          
+          const interval = setInterval(() => {
+            fileProgress += 25;
+            if (fileProgress >= 100) {
+              fileProgress = 100;
+              clearInterval(interval);
+              
+              setCopyProgress(prev => {
+                const overallProgress = Math.round(((i * 100) + 100) / pathsToCopy.length);
+                return {
+                  ...prev,
+                  [item.id]: {
+                    progress: overallProgress,
+                    bytesCopied: totalBytes,
+                    totalBytes,
+                    speedMbs: 0,
+                    completed: i === pathsToCopy.length - 1
+                  }
+                };
+              });
+              resolveSim();
+            } else {
+              setCopyProgress(prev => {
+                const overallProgress = Math.round(((i * 100) + fileProgress) / pathsToCopy.length);
+                return {
+                  ...prev,
+                  [item.id]: {
+                    progress: overallProgress,
+                    bytesCopied: Math.round(totalBytes * (fileProgress / 100)),
+                    totalBytes,
+                    speedMbs,
+                    completed: false
+                  }
+                };
+              });
+            }
+          }, 200);
+        });
+      }
+      showToast(`[شبیه‌ساز] فایل‌های ${item.mediaTitle} به پوشه مجازی فلش کپی شد!`, 'success');
+      return true;
     }
+  };
+
+  const handleCopyAllToUsb = async () => {
+    const activeSession = sessions.find(s => s.id === activeSessionId) || sessions[0];
+    const destDir = activeSession.selectedDrivePath;
+    if (!destDir) {
+      showAlert('لطفاً ابتدا از بخش انتخاب مشتری، مسیر فلش دیسک (USB) مقصد را مشخص کنید.', 'warning', 'مسیر فلش انتخاب نشده');
+      return;
+    }
+    
+    if (cart.length === 0) {
+      showAlert('سبد خرید شما خالی است.', 'warning');
+      return;
+    }
+    
+    setIsCopyingAll(true);
+    showToast('شروع کپی صف‌به‌صف تمامی اقلام به فلش دیسک مشتری...', 'info');
+    
+    for (const item of cart) {
+      if (copyProgress[item.id]?.completed) {
+        continue;
+      }
+      
+      const success = await copyCartItemToUsb(item);
+      if (!success) {
+        const resume = await showConfirm(`خطایی در کپی "${item.mediaTitle}" رخ داد. آیا مایلید کپی سایر اقلام باقی‌مانده را ادامه دهید؟`, 'خطا در کپی');
+        if (!resume) {
+          break;
+        }
+      }
+    }
+    
+    setIsCopyingAll(false);
+    showToast('عملیات کپی کلی صف تمام شد.', 'success');
   };
 
   const handleSelectDrive = async () => {
@@ -300,7 +509,7 @@ export default function CartBar({
   };
 
   // Finalize Invoice and register sales
-  const handleCheckoutInvoice = () => {
+  const handleCheckoutInvoice = async () => {
     if (!currentCustomer) {
       showAlert('لطفاً ابتدا نام مشتری فاکتور را وارد کنید.', 'warning');
       setShowCustomerModal(true);
@@ -314,6 +523,54 @@ export default function CartBar({
     try {
       const totalPurchasePrice = cart.reduce((sum, item) => sum + item.purchasePrice, 0);
       const totalSaleBeforeDiscount = cartSubtotal;
+
+      // Generate and save cinema invoice image if USB is selected
+      const activeSession = sessions.find(s => s.id === activeSessionId) || sessions[0];
+      const destDir = activeSession.selectedDrivePath;
+      let invoiceSavedMsg = '';
+      
+      const settings = dbService.getSettings();
+      const isInvoiceSavingEnabled = settings.saveInvoiceToUsbEnabled !== false;
+      
+      if (destDir && isInvoiceSavingEnabled && saveInvoiceLocal) {
+        const shopName = settings.shopName || 'کلوپ فیلم و سریال پارس';
+        const shopPhone = settings.shopPhone || '۰۹۱۲۳۴۵۶۷۸۹';
+        const shopAddress = settings.shopAddress || 'تهران، خیابان رسانه، پلاک ۱لوپ فیلم';
+        
+        const invoiceDataUrl = generateCinemaInvoiceImage(
+          currentCustomer,
+          cart,
+          discountInput,
+          cartTotal,
+          shopName,
+          shopPhone,
+          shopAddress
+        );
+        
+        if (invoiceDataUrl) {
+          const timestamp = new Date().toISOString().replace(/[:.]/g, '-');
+          const cleanCustName = currentCustomer.replace(/[\\/:*?"<>|]/g, '').trim();
+          const filename = `invoice-${cleanCustName}-${timestamp}.png`;
+          
+          if (window.electronAPI && window.electronAPI.saveInvoiceImage) {
+            const saveRes = await window.electronAPI.saveInvoiceImage(destDir, invoiceDataUrl, filename);
+            if (saveRes && saveRes.success) {
+              invoiceSavedMsg = `\n\n📸 تصویر فاکتور با تم سینمایی با نام "${filename}" با موفقیت در پوشه فلش ذخیره شد!`;
+            } else {
+              invoiceSavedMsg = `\n\n⚠️ تصویر فاکتور به دلیل خطا در پوشه فلش ذخیره نشد: ${saveRes?.error || 'خطای ناشناخته'}`;
+            }
+          } else {
+            // Browser download fallback
+            const link = document.createElement('a');
+            link.href = invoiceDataUrl;
+            link.download = filename;
+            document.body.appendChild(link);
+            link.click();
+            document.body.removeChild(link);
+            invoiceSavedMsg = `\n\n📸 [شبیه‌ساز] تصویر فاکتور با تم سینمایی دانلود شد.`;
+          }
+        }
+      }
 
       // Create a single unified parent transaction for accounting
       dbService.addSale({
@@ -335,7 +592,7 @@ export default function CartBar({
       setShowInvoiceModal(false);
       onInvoiceSettled();
 
-      showAlert(`فاکتور فروش تجمیعی برای آقای/خانم "${currentCustomer}" شامل ${cart.length} اثر با موفقیت صادر و ثبت شد.`, 'success', 'عملیات موفقیت‌آمیز');
+      showAlert(`فاکتور فروش تجمیعی برای آقای/خانم "${currentCustomer}" شامل ${cart.length} اثر با موفقیت صادر و ثبت شد.${invoiceSavedMsg}`, 'success', 'عملیات موفقیت‌آمیز');
     } catch (err) {
       showAlert('خطا در ثبت فاکتور مالی: ' + (err as Error).message, 'error');
     }
@@ -699,9 +956,9 @@ export default function CartBar({
                                 )}
 
                                 {/* Direct USB copy button */}
-                                {item.filePath && (
+                                {(item.filePath || (item.videoPaths && item.videoPaths.length > 0)) && (
                                   <button
-                                    onClick={() => handleCopyFileToUsb(item.id, item.filePath, item.mediaTitle)}
+                                    onClick={() => copyCartItemToUsb(item)}
                                     disabled={progressInfo && !progressInfo.completed && !progressInfo.error}
                                     className={`p-1.5 rounded-lg transition-colors cursor-pointer flex items-center gap-1 text-[9.5px] font-extrabold ${progressInfo?.completed ? 'bg-emerald-500/10 text-emerald-500 hover:bg-emerald-500/20' : 'bg-blue-600 hover:bg-blue-700 text-white shadow shadow-blue-600/30 disabled:opacity-80'}`}
                                     title="انتقال خودکار و کپی سریع به فلش مموری مشتری"
@@ -769,6 +1026,25 @@ export default function CartBar({
                 </tbody>
               </table>
               
+              {dbService.getSettings().saveInvoiceToUsbEnabled !== false && (
+                <div className="mt-4 p-4 bg-emerald-500/5 dark:bg-slate-800/40 border border-emerald-500/20 rounded-xl flex items-center justify-between" id="checkout-save-invoice-switch">
+                  <div className="flex flex-col text-right">
+                    <span className="text-xs font-black text-emerald-600 dark:text-emerald-400">ذخیره تصویر فاکتور در فلش مشتری</span>
+                    <span className="text-[10px] text-gray-400 mt-0.5">تصویر فاکتور به صورت خودکار در ریشه فلش دیسک کپی می‌شود.</span>
+                  </div>
+                  <label className="relative inline-flex items-center cursor-pointer select-none">
+                    <input 
+                      type="checkbox" 
+                      checked={saveInvoiceLocal}
+                      onChange={(e) => setSaveInvoiceLocal(e.target.checked)}
+                      className="sr-only peer"
+                      id="checkout-invoice-toggle-checkbox"
+                    />
+                    <div className="w-11 h-6 bg-gray-200 dark:bg-slate-700 peer-focus:outline-none rounded-full peer peer-checked:after:-translate-x-5 peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:right-[2px] after:bg-white after:border-gray-300 after:border after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-emerald-600"></div>
+                  </label>
+                </div>
+              )}
+              
               {/* Note for copier store */}
               <div className="mt-8 p-3.5 bg-amber-50 dark:bg-amber-950/15 border border-amber-100 dark:border-amber-950/20 text-xs text-amber-800 dark:text-amber-400/90 rounded-xl flex items-start gap-2">
                 <FolderClosed className="w-4 h-4 shrink-0 mt-0.5" />
@@ -811,13 +1087,31 @@ export default function CartBar({
                 </div>
               </div>
 
-              <div className="flex gap-2 w-full md:w-auto">
+              <div className="flex gap-2 w-full md:w-auto flex-wrap">
                 <button
                   type="button"
                   onClick={() => setShowInvoiceModal(false)}
                   className="flex-1 md:flex-none px-5 h-11 bg-gray-200 hover:bg-gray-250 dark:bg-slate-800 dark:hover:bg-slate-700 text-gray-700 dark:text-gray-200 rounded-xl text-xs font-bold transition-all cursor-pointer"
                 >
                   ویرایش سبد خرید
+                </button>
+                <button
+                  type="button"
+                  onClick={handleCopyAllToUsb}
+                  disabled={cart.length === 0 || isCopyingAll}
+                  className="flex-1 md:flex-none px-5 h-11 bg-gradient-to-r from-blue-600 to-indigo-600 hover:from-blue-700 hover:to-indigo-700 text-white rounded-xl text-xs font-black transition-all shadow-lg shadow-blue-600/15 flex items-center justify-center gap-2 cursor-pointer disabled:opacity-50"
+                >
+                  {isCopyingAll ? (
+                    <>
+                      <RefreshCw className="w-4.5 h-4.5 animate-spin" />
+                      <span>در حال کپی گروهی...</span>
+                    </>
+                  ) : (
+                    <>
+                      <Copy className="w-4.5 h-4.5" />
+                      <span>کپی صف‌به‌صف همه به فلش</span>
+                    </>
+                  )}
                 </button>
                 <button
                   type="button"

@@ -729,6 +729,7 @@ export default function SeriesPage({
   const [selectedSaleSeason, setSelectedSaleSeason] = useState('');
   const [selectedSaleEpisode, setSelectedSaleEpisode] = useState('');
   const [selectedSaleEpisodes, setSelectedSaleEpisodes] = useState<string[]>([]);
+  const [episodeSearchQuery, setEpisodeSearchQuery] = useState('');
   const [calculatedPrice, setCalculatedPrice] = useState(0);
   const [saleDiscount, setSaleDiscount] = useState(0);
 
@@ -847,8 +848,7 @@ export default function SeriesPage({
     setShowFormModal(true);
   };
 
-  const handleOpenCreate = () => {
-    setEditingSeries(null);
+  const clearFormFields = () => {
     setFormCategory('ایرانی');
     setFormTitleFa('');
     setFormTitleEn('');
@@ -878,6 +878,13 @@ export default function SeriesPage({
     setFormIsEndedText('پایان سریال');
     setFormSeasons([]);
     setImportText('');
+  };
+
+  const handleOpenCreate = () => {
+    if (editingSeries !== null) {
+      clearFormFields();
+    }
+    setEditingSeries(null);
     setShowFormModal(true);
   };
 
@@ -1078,6 +1085,7 @@ export default function SeriesPage({
     }
 
     setShowFormModal(false);
+    clearFormFields();
     refreshData();
   };
 
@@ -3734,30 +3742,75 @@ export default function SeriesPage({
                   </div>
 
                   <div className="space-y-1 bg-gray-50 dark:bg-slate-900 border border-gray-150 dark:border-slate-800 rounded-lg p-2.5">
-                    <label className="text-[10px] font-bold text-gray-400 block mb-1">انتخاب قسمت‌های مورد نظر:</label>
+                    <div className="flex items-center justify-between gap-2 mb-2">
+                      <label className="text-[10px] font-bold text-gray-400 block">انتخاب قسمت‌های مورد نظر:</label>
+                      <div className="flex items-center gap-1.5">
+                        <button
+                          type="button"
+                          onClick={() => {
+                            const allEps = (sellingSeries.seasons.find(s => s.id === selectedSaleSeason)?.episodes || []);
+                            const filteredEps = allEps.filter(ep => {
+                              if (!episodeSearchQuery) return true;
+                              return ep.name.toLowerCase().includes(episodeSearchQuery.toLowerCase()) || 
+                                     ep.episodeNumber.toString().includes(episodeSearchQuery);
+                            });
+                            setSelectedSaleEpisodes(prev => {
+                              const otherEps = prev.filter(id => !allEps.some(e => e.id === id));
+                              return [...otherEps, ...filteredEps.map(e => e.id)];
+                            });
+                          }}
+                          className="px-1 py-0.5 bg-indigo-50 hover:bg-indigo-100 text-indigo-700 text-[8.5px] font-black rounded"
+                        >
+                          همه
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => {
+                            const allEps = (sellingSeries.seasons.find(s => s.id === selectedSaleSeason)?.episodes || []);
+                            setSelectedSaleEpisodes(prev => prev.filter(id => !allEps.some(e => e.id === id)));
+                          }}
+                          className="px-1 py-0.5 bg-gray-150 hover:bg-gray-200 text-gray-700 text-[8.5px] font-black rounded"
+                        >
+                          هیچکدام
+                        </button>
+                        <input
+                          type="text"
+                          placeholder="جستجوی قسمت..."
+                          value={episodeSearchQuery}
+                          onChange={(e) => setEpisodeSearchQuery(e.target.value)}
+                          className="w-24 px-1.5 py-0.5 bg-white dark:bg-slate-800 border border-gray-250 dark:border-slate-700 rounded text-[9.5px] font-bold"
+                        />
+                      </div>
+                    </div>
                     <div className="max-h-36 overflow-y-auto space-y-1 pr-1 custom-scrollbar">
-                      {(sellingSeries.seasons.find(s => s.id === selectedSaleSeason)?.episodes || []).map(ep => {
-                        const isChecked = selectedSaleEpisodes.includes(ep.id);
-                        return (
-                          <label key={ep.id} className="flex items-center gap-2 p-1.5 hover:bg-gray-150/50 dark:hover:bg-slate-800/50 rounded cursor-pointer text-xs">
-                            <input 
-                              type="checkbox"
-                              checked={isChecked}
-                              onChange={() => {
-                                if (isChecked) {
-                                  setSelectedSaleEpisodes(selectedSaleEpisodes.filter(id => id !== ep.id));
-                                } else {
-                                  setSelectedSaleEpisodes([...selectedSaleEpisodes, ep.id]);
-                                }
-                              }}
-                              className="accent-indigo-600 w-3.5 h-3.5 shrink-0"
-                            />
-                            <span className="text-gray-700 dark:text-gray-300 font-bold leading-none">
-                              قسمت {toPersianNums(ep.episodeNumber)}: {ep.name}
-                            </span>
-                          </label>
-                        );
-                      })}
+                      {(sellingSeries.seasons.find(s => s.id === selectedSaleSeason)?.episodes || [])
+                        .filter(ep => {
+                          if (!episodeSearchQuery) return true;
+                          return ep.name.toLowerCase().includes(episodeSearchQuery.toLowerCase()) || 
+                                 ep.episodeNumber.toString().includes(episodeSearchQuery);
+                        })
+                        .map(ep => {
+                          const isChecked = selectedSaleEpisodes.includes(ep.id);
+                          return (
+                            <label key={ep.id} className="flex items-center gap-2 p-1.5 hover:bg-gray-150/50 dark:hover:bg-slate-800/50 rounded cursor-pointer text-xs">
+                              <input 
+                                type="checkbox"
+                                checked={isChecked}
+                                onChange={() => {
+                                  if (isChecked) {
+                                    setSelectedSaleEpisodes(selectedSaleEpisodes.filter(id => id !== ep.id));
+                                  } else {
+                                    setSelectedSaleEpisodes([...selectedSaleEpisodes, ep.id]);
+                                  }
+                                }}
+                                className="accent-indigo-600 w-3.5 h-3.5 shrink-0"
+                              />
+                              <span className="text-gray-700 dark:text-gray-300 font-bold leading-none">
+                                قسمت {toPersianNums(ep.episodeNumber)}: {ep.name}
+                              </span>
+                            </label>
+                          );
+                        })}
                       {(sellingSeries.seasons.find(s => s.id === selectedSaleSeason)?.episodes || []).length === 0 && (
                         <div className="text-[10px] text-gray-400 text-center py-4">این فصل فاقد قسمت است.</div>
                       )}

@@ -113,7 +113,7 @@ export default function ProductCategories() {
   };
 
   // Build recursive tree nested structure
-  const buildTree = (flatList: Category[], parentId: number | null = null): Category[] => {
+  const buildTree = (flatList: Category[], parentId: any = null): Category[] => {
     return flatList
       .filter(item => {
         // Compare values strictly or allow undefined/null equivalents

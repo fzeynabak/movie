@@ -169,6 +169,7 @@ export interface AppSettings {
   tmdbLanguage?: string;
   tmdbIncludeAdult?: boolean;
   videoPlayerMode?: 'internal' | 'external';
+  saveInvoiceToUsbEnabled?: boolean;
 }
 
 declare global {
@@ -197,15 +198,60 @@ declare global {
       scanMediaDirectory?: (dirpath: string) => Promise<{ success: boolean; files?: Array<{ filename: string; fullPath: string; extension: string; folder: string; size: number; modifiedDate: string }>; error?: string }>;
       getLocalIps?: () => Promise<string[]>;
       downloadLanFile?: (url: string, destPath: string) => Promise<{ success: boolean; error?: string }>;
-      copyFileToUsb?: (sourcePath: string, destDir: string, id: string) => Promise<{ success: boolean; destPath?: string; error?: string }>;
+      copyFileToUsb?: (sourcePath: string, destDir: string, id: string, customRelativePath?: string) => Promise<{ success: boolean; destPath?: string; error?: string }>;
+      saveInvoiceImage?: (destDir: string, base64Data: string, filename: string) => Promise<{ success: boolean; destPath?: string; error?: string }>;
       findMatchingSubtitles?: (videoPath: string) => Promise<{ success: boolean; subtitles?: string[]; error?: string }>;
       readTextFile?: (filepath: string) => Promise<{ success: boolean; content?: string; error?: string }>;
       exportSqliteDb?: (destPath: string) => Promise<{ success: boolean; error?: string }>;
       importSqliteDb?: (srcPath: string) => Promise<{ success: boolean; error?: string }>;
+      getInventoryHistory?: () => Promise<any[]>;
+      getPersons?: () => Promise<any[]>;
+      getInvoices?: () => Promise<any[]>;
+      saveReturn?: (data: any) => Promise<any>;
+      saveInvoice?: (data: any) => Promise<any>;
+      deleteInvoice?: (id: any) => Promise<any>;
+      getWarehouseStocks?: (warehouseId?: any) => Promise<any[]>;
+      saveWarehouse?: (data: any) => Promise<any>;
+      deleteWarehouse?: (id: any) => Promise<any>;
+      addWarehouseTransaction?: (data: any) => Promise<any>;
+      getShareholdersStatistics?: () => Promise<any>;
+      getShareholders?: () => Promise<any[]>;
+      addShareholderDirect?: (data: any) => Promise<any>;
+      updateShareholder?: (data: any) => Promise<any>;
+      deleteShareholder?: (id: any) => Promise<any>;
+      getSystemUsers?: () => Promise<any[]>;
+      saveUserAccount?: (data: any) => Promise<any>;
+      addAuditLog?: (data: any) => Promise<any>;
+      deleteUserAccount?: (id: any) => Promise<any>;
+      getWarehouses?: () => Promise<any[]>;
+      getProducts?: () => Promise<any[]>;
+      addPerson?: (data: any) => Promise<any>;
+      getDbStats?: () => Promise<any>;
+      getConfig?: () => Promise<any>;
+      changeDbPath?: (data?: any) => Promise<any>;
+      saveConfig?: (data: any) => Promise<any>;
+      checkOnboardingStatus?: () => Promise<any>;
+      performOnboarding?: (data: any) => Promise<any>;
+      getSellers?: () => Promise<any[]>;
+      addSellerDirect?: (data: any) => Promise<any>;
+      updateSeller?: (data: any) => Promise<any>;
+      deleteSeller?: (id: any) => Promise<any>;
+      deleteProduct?: (id: any) => Promise<any>;
+      getProductSalesHistory?: (id: any) => Promise<any>;
+      getProductPurchaseHistory?: (id: any) => Promise<any>;
+      getProductInventoryCirculation?: (id: any) => Promise<any>;
+      getCategories?: () => Promise<any[]>;
+      getBrands?: () => Promise<any[]>;
+      selectLocalImage?: () => Promise<any>;
+      saveProduct?: (data: any) => Promise<any>;
+      getDebtorsCreditorsSummary?: () => Promise<any>;
+      deleteBrand?: (id: any) => Promise<any>;
       onCopyProgress?: (callback: (data: { id: string; progress: number; bytesCopied: number; totalBytes: number; speedMbs: number; completed?: boolean; error?: string }) => void) => void;
       onDownloadProgress?: (callback: (data: any) => void) => void;
+      [key: string]: any;
     };
   }
+  type Person = { id: string; [key: string]: any };
 }
 
 export function getSafePosterUrl(poster: string | undefined | null): string {
@@ -224,4 +270,68 @@ export function getSafePosterUrl(poster: string | undefined | null): string {
   }
   return formatted;
 }
+
+export interface SystemUser {
+  id: string;
+  [key: string]: any;
+}
+
+export interface Person {
+  id: string;
+  [key: string]: any;
+}
+
+export interface Warehouse {
+  id: string;
+  [key: string]: any;
+}
+
+export interface WarehouseStock {
+  id: string;
+  [key: string]: any;
+}
+
+export interface Product {
+  id: string;
+  [key: string]: any;
+}
+
+export interface Shareholder {
+  id: string;
+  [key: string]: any;
+}
+
+export interface Seller {
+  id: string;
+  [key: string]: any;
+}
+
+export interface Category {
+  id: string;
+  [key: string]: any;
+}
+
+export interface Brand {
+  id: string;
+  [key: string]: any;
+}
+
+export interface Invoice {
+  id: string;
+  [key: string]: any;
+}
+
+export interface Employee {
+  id: string;
+  [key: string]: any;
+}
+
+export interface EmployeeTransaction {
+  id: string;
+  [key: string]: any;
+}
+
+
+
+
 

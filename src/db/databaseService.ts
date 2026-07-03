@@ -31,7 +31,8 @@ const DEFAULT_SETTINGS: AppSettings = {
   shopAddress: 'تهران، خیابان ولیعصر، تقاطع میرداماد، خدمات رسانه پارس تک',
   shopPhone: '۰۹۳۸۰۰۷۲۰۱۹',
   shopPhoneSecondary: '۰۲۱-۸۸۸۸۸۸۸۸',
-  videoPlayerMode: 'internal'
+  videoPlayerMode: 'internal',
+  saveInvoiceToUsbEnabled: true
 };
 
 class DatabaseService {

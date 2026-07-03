@@ -7,6 +7,7 @@ import React, { useState, useEffect } from 'react';
 import { dbService } from '../db/databaseService';
 import { Sale } from '../types';
 import { toPersianNums, formatCurrency } from './Dashboard';
+import { showToast, showAlert, showConfirm } from '../utils/toast';
 import { 
   CreditCard, 
   Search, 
@@ -22,7 +23,10 @@ import {
   Scale,
   Percent,
   Check,
-  FolderOpen
+  FolderOpen,
+  Copy,
+  RefreshCw,
+  AlertTriangle
 } from 'lucide-react';
 
 export default function SalesPage() {
@@ -32,6 +36,347 @@ export default function SalesPage() {
   const [filterEndDate, setFilterEndDate] = useState('');
   const [selectedSaleDetail, setSelectedSaleDetail] = useState<Sale | null>(null);
   const [shopSettings, setShopSettings] = useState<any>(null);
+  const [drivePath, setDrivePath] = useState(() => {
+    return localStorage.getItem('mediacenter_active_drive_path') || '';
+  });
+  
+  const [copyProgress, setCopyProgress] = useState<Record<string, {
+    progress: number;
+    bytesCopied: number;
+    totalBytes: number;
+    speedMbs: number;
+    completed: boolean;
+    error?: string;
+  }>>({});
+  
+  const [isCopyingAll, setIsCopyingAll] = useState(false);
+  
+  const currentCopyIndicesRef = React.useRef<Record<string, { current: number, total: number }>>({});
+
+  useEffect(() => {
+    if (window.electronAPI && window.electronAPI.onCopyProgress) {
+      window.electronAPI.onCopyProgress((data) => {
+        setCopyProgress(prev => {
+          const indexInfo = currentCopyIndicesRef.current[data.id];
+          let displayProgress = data.progress;
+          let displayCompleted = data.completed;
+          
+          if (indexInfo && indexInfo.total > 1) {
+            const currentFileIndex = indexInfo.current;
+            const totalFiles = indexInfo.total;
+            displayProgress = Math.round(((currentFileIndex * 100) + data.progress) / totalFiles);
+            displayCompleted = data.completed && (currentFileIndex === totalFiles - 1);
+          }
+          
+          return {
+            ...prev,
+            [data.id]: {
+              progress: displayProgress,
+              bytesCopied: data.bytesCopied,
+              totalBytes: data.totalBytes,
+              speedMbs: data.speedMbs,
+              completed: !!displayCompleted,
+              error: data.error
+            }
+          };
+        });
+      });
+    }
+  }, []);
+
+  const cleanTitleForFilename = (title: string): string => {
+    if (!title) return 'media';
+    return title
+      .toLowerCase()
+      .replace(/[^\w\s\u0600-\u06FF-]/g, '')
+      .trim()
+      .replace(/\s+/g, '-');
+  };
+
+  const cleanFolderName = (name: string): string => {
+    if (!name) return 'Folder';
+    return name.replace(/[\\/:*?"<>|]/g, '').trim();
+  };
+
+  const getCopyDestinationRelativePath = (item: any, sourcePath: string): string => {
+    const ext = sourcePath.substring(sourcePath.lastIndexOf('.')) || '.mkv';
+    
+    if (item.mediaType === 'series') {
+      const series = dbService.getSeries().find(s => s.id === item.mediaId);
+      const rawFolderName = series ? (series.titleEn || series.titleFa) : item.mediaTitle;
+      const folderName = cleanFolderName(rawFolderName);
+      
+      const sNum = item.seasonNumber !== undefined ? item.seasonNumber : 1;
+      const eNum = item.episodeNumber !== undefined ? item.episodeNumber : 1;
+      const sStr = sNum.toString().padStart(2, '0');
+      const eStr = eNum.toString().padStart(2, '0');
+      
+      const cleanSeriesTitle = cleanTitleForFilename(series?.titleEn || series?.titleFa || item.mediaTitle);
+      const filename = `${cleanSeriesTitle}-s${sStr}e${eStr}${ext}`;
+      
+      return `${folderName}/${filename}`;
+    } else {
+      const movie = dbService.getMovies().find(m => m.id === item.mediaId);
+      const rawFolderName = movie ? (movie.titleEn || movie.titleFa) : item.mediaTitle;
+      const folderName = cleanFolderName(rawFolderName);
+      
+      const cleanMovieTitle = cleanTitleForFilename(movie?.titleEn || movie?.titleFa || item.mediaTitle);
+      const filename = `${cleanMovieTitle}${ext}`;
+      
+      return `${folderName}/${filename}`;
+    }
+  };
+
+  const getMediaPaths = (item: any) => {
+    if (item.videoPaths && item.videoPaths.length > 0) {
+      return item.videoPaths;
+    }
+    if (item.filePath) {
+      return [item.filePath];
+    }
+    
+    // Dynamically look up in db Cache as fallback
+    if (item.mediaType === 'movie') {
+      const movie = dbService.getMovies().find(m => m.id === item.mediaId);
+      if (movie && movie.filePath) {
+        return [movie.filePath];
+      }
+    } else if (item.mediaType === 'series') {
+      const series = dbService.getSeries().find(s => s.id === item.mediaId);
+      if (series) {
+        // Find if there's episode file matching details
+        const eps = (dbService as any).getEpisodes ? (dbService as any).getEpisodes(series.id) : [];
+        if (eps && eps.length > 0) {
+          return eps.map((e: any) => e.filePath).filter(Boolean);
+        }
+      }
+    }
+    return [];
+  };
+
+  const handleSelectDrive = async () => {
+    if (window.electronAPI && window.electronAPI.selectDirectory) {
+      try {
+        const dir = await window.electronAPI.selectDirectory();
+        if (dir) {
+          setDrivePath(dir);
+          localStorage.setItem('mediacenter_active_drive_path', dir);
+          showToast(`مسیر فلش دیسک با موفقیت روی "${dir}" تنظیم شد.`, 'success');
+        }
+      } catch (err) {
+        showToast('خطا در انتخاب مسیر فلش: ' + (err as Error).message, 'error');
+      }
+    } else {
+      const mockPaths = ['F:\\Movies', 'G:\\مشتری', '/Volumes/USB_DRIVE', '/media/usb0'];
+      const randomPath = mockPaths[Math.floor(Math.random() * mockPaths.length)];
+      setDrivePath(randomPath);
+      localStorage.setItem('mediacenter_active_drive_path', randomPath);
+      showToast(`[شبیه‌ساز] مسیر فلش روی "${randomPath}" شبیه‌سازی شد.`, 'success');
+    }
+  };
+
+  const copySaleItemToUsb = async (item: any): Promise<boolean> => {
+    const destDir = drivePath;
+    if (!destDir) {
+      showAlert('لطفاً ابتدا از بالای فاکتور، مسیر فلش دیسک (USB) مقصد را مشخص کنید.', 'warning', 'مسیر فلش انتخاب نشده');
+      return false;
+    }
+    
+    const pathsToCopy = getMediaPaths(item);
+    if (pathsToCopy.length === 0) {
+      showAlert(`مسیری برای فایل‌های ${item.mediaTitle} پیدا نشد. امکان کپی وجود ندارد.`, 'warning');
+      return false;
+    }
+    
+    setCopyProgress(prev => ({
+      ...prev,
+      [item.id]: {
+        progress: 0,
+        bytesCopied: 0,
+        totalBytes: 0,
+        speedMbs: 0,
+        completed: false
+      }
+    }));
+    
+    currentCopyIndicesRef.current[item.id] = { current: 0, total: pathsToCopy.length };
+    
+    if (window.electronAPI && window.electronAPI.copyFileToUsb) {
+      let copyCount = 0;
+      for (let i = 0; i < pathsToCopy.length; i++) {
+        const sourcePath = pathsToCopy[i];
+        currentCopyIndicesRef.current[item.id].current = i;
+        
+        const customRelativePath = getCopyDestinationRelativePath(item, sourcePath);
+        const absoluteDestPath = `${destDir}/${customRelativePath}`.replace(/\\/g, '/');
+        
+        let alreadyExists = false;
+        if (window.electronAPI.existsFile) {
+          try {
+            const checkRes = await window.electronAPI.existsFile(absoluteDestPath);
+            if (checkRes && checkRes.exists) {
+              alreadyExists = true;
+            }
+          } catch (err) {
+            console.error('Error checking file existence:', err);
+          }
+        }
+        
+        if (alreadyExists) {
+          const overallProgress = Math.round(((i * 100) + 100) / pathsToCopy.length);
+          const isOverallCompleted = (i === pathsToCopy.length - 1);
+          setCopyProgress(prev => ({
+            ...prev,
+            [item.id]: {
+              progress: overallProgress,
+              bytesCopied: 0,
+              totalBytes: 0,
+              speedMbs: 0,
+              completed: isOverallCompleted
+            }
+          }));
+          continue;
+        }
+        
+        copyCount++;
+        try {
+          const res = await window.electronAPI.copyFileToUsb(sourcePath, destDir, item.id, customRelativePath);
+          if (res && !res.success) {
+            setCopyProgress(prev => ({
+              ...prev,
+              [item.id]: {
+                ...prev[item.id],
+                completed: false,
+                error: res.error || 'خطای کپی فایل'
+              }
+            }));
+            showToast(`خطا در کپی ${item.mediaTitle}: ${res.error}`, 'error');
+            return false;
+          }
+        } catch (err) {
+          setCopyProgress(prev => ({
+            ...prev,
+            [item.id]: {
+              ...prev[item.id],
+              completed: false,
+              error: (err as Error).message
+            }
+          }));
+          showToast(`خطا در ارتباط کپی فایل: ${(err as Error).message}`, 'error');
+          return false;
+        }
+      }
+      
+      setCopyProgress(prev => ({
+        ...prev,
+        [item.id]: {
+          ...prev[item.id],
+          progress: 100,
+          completed: true
+        }
+      }));
+      if (copyCount === 0) {
+        showToast(`رسانه ${item.mediaTitle} قبلاً کپی شده بود (رد شد).`, 'success');
+      } else {
+        showToast(`رسانه ${item.mediaTitle} با موفقیت به فلش منتقل شد!`, 'success');
+      }
+      return true;
+    } else {
+      showToast(`شبیه‌ساز مرورگر: کپی کردن فایل‌های ${item.mediaTitle} به فلش دیسک آغاز شد...`, 'info');
+      
+      for (let i = 0; i < pathsToCopy.length; i++) {
+        currentCopyIndicesRef.current[item.id].current = i;
+        await new Promise<void>((resolveSim) => {
+          let fileProgress = 0;
+          const totalBytes = 500 * 1024 * 1024;
+          const speedMbs = 45.2;
+          
+          const interval = setInterval(() => {
+            fileProgress += 25;
+            if (fileProgress >= 100) {
+              fileProgress = 100;
+              clearInterval(interval);
+              
+              setCopyProgress(prev => {
+                const overallProgress = Math.round(((i * 100) + 100) / pathsToCopy.length);
+                return {
+                  ...prev,
+                  [item.id]: {
+                    progress: overallProgress,
+                    bytesCopied: totalBytes,
+                    totalBytes,
+                    speedMbs: 0,
+                    completed: i === pathsToCopy.length - 1
+                  }
+                };
+              });
+              resolveSim();
+            } else {
+              setCopyProgress(prev => {
+                const overallProgress = Math.round(((i * 100) + fileProgress) / pathsToCopy.length);
+                return {
+                  ...prev,
+                  [item.id]: {
+                    progress: overallProgress,
+                    bytesCopied: Math.round(totalBytes * (fileProgress / 100)),
+                    totalBytes,
+                    speedMbs,
+                    completed: false
+                  }
+                };
+              });
+            }
+          }, 200);
+        });
+      }
+      showToast(`[شبیه‌ساز] فایل‌های ${item.mediaTitle} به پوشه مجازی فلش کپی شد!`, 'success');
+      return true;
+    }
+  };
+
+  const handleCopyAllToUsb = async () => {
+    const destDir = drivePath;
+    if (!destDir) {
+      showAlert('لطفاً ابتدا از بالای فاکتور، مسیر فلش دیسک (USB) مقصد را مشخص کنید.', 'warning', 'مسیر فلش انتخاب نشده');
+      return;
+    }
+    
+    if (!selectedSaleDetail) return;
+    
+    const items = selectedSaleDetail.items && selectedSaleDetail.items.length > 0 
+      ? selectedSaleDetail.items 
+      : [{
+          id: selectedSaleDetail.id,
+          mediaId: selectedSaleDetail.mediaId,
+          mediaTitle: selectedSaleDetail.mediaTitle,
+          mediaType: selectedSaleDetail.mediaType,
+          details: selectedSaleDetail.details,
+          salePrice: selectedSaleDetail.salePrice,
+          purchasePrice: selectedSaleDetail.purchasePrice,
+          filePath: (selectedSaleDetail as any).filePath || '',
+          videoPaths: (selectedSaleDetail as any).videoPaths || []
+        }];
+
+    setIsCopyingAll(true);
+    showToast('شروع کپی صف‌به‌صف تمامی اقلام فاکتور به فلش دیسک مشتری...', 'info');
+    
+    for (const item of items) {
+      if (copyProgress[item.id]?.completed) {
+        continue;
+      }
+      
+      const success = await copySaleItemToUsb(item);
+      if (!success) {
+        const resume = await showConfirm(`خطایی در کپی "${item.mediaTitle}" رخ داد. آیا مایلید کپی سایر اقلام باقی‌مانده را ادامه دهید؟`, 'خطا در کپی');
+        if (!resume) {
+          break;
+        }
+      }
+    }
+    
+    setIsCopyingAll(false);
+    showToast('عملیات کپی گروهی اقلام فاکتور با موفقیت به پایان رسید.', 'success');
+  };
 
   useEffect(() => {
     refreshData();
@@ -358,6 +703,21 @@ export default function SalesPage() {
               </div>
             </div>
 
+            {/* USB Drive Selector Panel */}
+            <div className="px-5 py-2.5 bg-slate-900 text-white flex items-center justify-between gap-2 border-b border-gray-700 no-print shrink-0">
+              <div className="flex items-center gap-2 text-right">
+                <span className="w-2.5 h-2.5 rounded-full bg-emerald-500 animate-pulse"></span>
+                <span className="text-[10px] font-bold text-gray-300">مسیر فلش دیسک (USB) مشتری:</span>
+                <span className="font-mono text-[10.5px] text-emerald-400 font-extrabold">{drivePath || 'انتخاب نشده ⚠️'}</span>
+              </div>
+              <button
+                onClick={handleSelectDrive}
+                className="px-2 py-1 bg-indigo-600 hover:bg-indigo-700 text-white text-[9.5px] font-black rounded transition-all cursor-pointer"
+              >
+                {drivePath ? 'تغییر مسیر' : 'انتخاب فلش دیسک'}
+              </button>
+            </div>
+
             {/* Scrollable container to prevent overflow issues */}
             <div className="flex-1 overflow-y-auto print:overflow-visible print:max-h-none">
               
@@ -413,43 +773,157 @@ export default function SalesPage() {
                         <th className="p-2 border-l border-slate-200">شرح عنوان رسانه</th>
                         <th className="p-2 border-l border-slate-200">نوع فروش مدیا</th>
                         <th className="p-2 text-left border-l border-slate-200">قیمت (تومان)</th>
-                        <th className="p-2 text-center no-print bg-gray-100">عملیات دیسک</th>
+                        <th className="p-2 text-center no-print bg-gray-100" style={{ width: '150px' }}>عملیات دیسک / فلش</th>
                       </tr>
                     </thead>
                     <tbody className="divide-y divide-slate-200">
                       {selectedSaleDetail.items && selectedSaleDetail.items.length > 0 ? (
-                        selectedSaleDetail.items.map((item, index) => (
-                          <tr key={item.id || index} className="text-gray-900">
-                            <td className="p-2 border-l border-slate-200 font-mono">#{item.mediaId.slice(-4).toUpperCase()}</td>
-                            <td className="p-2 border-l border-slate-200 font-bold text-indigo-950">{item.mediaTitle}</td>
-                            <td className="p-2 border-l border-slate-200 text-gray-500">{item.details}</td>
-                            <td className="p-2 text-left font-mono border-l border-slate-200 font-bold">{formatCurrency(item.salePrice)}</td>
-                            <td className="p-2 text-center no-print bg-gray-50/50">
-                              {item.filePath ? (
-                                <button
-                                  onClick={() => handleOpenFolder(item.filePath)}
-                                  className="px-1.5 py-0.5 bg-indigo-50 hover:bg-indigo-100 text-indigo-700 rounded text-[9px] font-bold inline-flex items-center gap-1 cursor-pointer transition-colors"
-                                  title="بارگیری و کپی سریع پوشه فیلم یا سریال"
-                                >
-                                  <FolderOpen className="w-2.5 h-2.5" />
-                                  <span>باز کردن پوشه</span>
-                                </button>
-                              ) : (
-                                <span className="text-gray-400 text-[8.5px] font-bold">بدون فایل</span>
-                              )}
-                            </td>
-                          </tr>
-                        ))
+                        selectedSaleDetail.items.map((item, index) => {
+                          const progressInfo = copyProgress[item.id];
+                          const hasPath = !!getMediaPaths(item).length;
+                          return (
+                            <tr key={item.id || index} className="text-gray-900">
+                              <td className="p-2 border-l border-slate-200 font-mono">#{item.mediaId.slice(-4).toUpperCase()}</td>
+                              <td className="p-2 border-l border-slate-200 font-bold text-indigo-950">{item.mediaTitle}</td>
+                              <td className="p-2 border-l border-slate-200 text-gray-500">{item.details}</td>
+                              <td className="p-2 text-left font-mono border-l border-slate-200 font-bold">{formatCurrency(item.salePrice)}</td>
+                              <td className="p-2 text-center no-print bg-gray-50/50">
+                                <div className="flex flex-col items-center gap-1.5">
+                                  <div className="flex items-center gap-1 justify-center">
+                                    {hasPath ? (
+                                      <>
+                                        <button
+                                          onClick={() => {
+                                            const paths = getMediaPaths(item);
+                                            if (paths.length > 0) handleOpenFolder(paths[0]);
+                                          }}
+                                          className="px-1.5 py-1 bg-indigo-50 hover:bg-indigo-100 text-indigo-700 rounded text-[9px] font-black flex items-center gap-0.5 cursor-pointer transition-colors"
+                                          title="باز کردن پوشه"
+                                        >
+                                          <FolderOpen className="w-3 h-3" />
+                                          <span>پوشه</span>
+                                        </button>
+                                        
+                                        <button
+                                          onClick={() => copySaleItemToUsb(item)}
+                                          disabled={progressInfo && !progressInfo.completed && !progressInfo.error}
+                                          className={`px-1.5 py-1 rounded text-[9px] font-black flex items-center gap-0.5 cursor-pointer transition-all ${progressInfo?.completed ? 'bg-emerald-500/10 text-emerald-600 hover:bg-emerald-500/20' : 'bg-blue-600 hover:bg-blue-700 text-white disabled:opacity-80'}`}
+                                          title="کپی مستقیم به فلش"
+                                        >
+                                          {progressInfo?.completed ? (
+                                            <>
+                                              <Check className="w-3 h-3 text-emerald-600" />
+                                              <span>کپی شد</span>
+                                            </>
+                                          ) : progressInfo && !progressInfo.completed && !progressInfo.error ? (
+                                            <>
+                                              <span className="w-2.5 h-2.5 rounded-full border-2 border-white border-t-transparent animate-spin inline-block"></span>
+                                              <span>% {progressInfo.progress}</span>
+                                            </>
+                                          ) : (
+                                            <span>کپی به فلش</span>
+                                          )}
+                                        </button>
+                                      </>
+                                    ) : (
+                                      <span className="text-gray-400 text-[8.5px] font-bold">بدون فایل</span>
+                                    )}
+                                  </div>
+                                  
+                                  {progressInfo && (
+                                    <div className="w-full max-w-[120px] text-center">
+                                      <div className="w-full bg-gray-200 dark:bg-slate-700 h-1 rounded overflow-hidden">
+                                        <div 
+                                          className={`h-full ${progressInfo.error ? 'bg-red-500' : progressInfo.completed ? 'bg-emerald-500' : 'bg-blue-500'}`}
+                                          style={{ width: `${progressInfo.progress}%` }}
+                                        ></div>
+                                      </div>
+                                    </div>
+                                  )}
+                                </div>
+                              </td>
+                            </tr>
+                          );
+                        })
                       ) : (
-                        <tr className="text-gray-950">
-                          <td className="p-2 border-l border-slate-200 font-mono">#{selectedSaleDetail.mediaId.slice(-4).toUpperCase()}</td>
-                          <td className="p-2 border-l border-slate-200 font-bold text-indigo-950">{selectedSaleDetail.mediaTitle}</td>
-                          <td className="p-2 border-l border-slate-200 text-gray-500">{selectedSaleDetail.details}</td>
-                          <td className="p-2 text-left font-mono border-l border-slate-200 font-bold">{formatCurrency(selectedSaleDetail.salePrice)}</td>
-                          <td className="p-2 text-center no-print">
-                            <span className="text-gray-400 text-[8.5px] font-bold">بدون فایل</span>
-                          </td>
-                        </tr>
+                        (() => {
+                          const legacyItem = {
+                            id: selectedSaleDetail.id,
+                            mediaId: selectedSaleDetail.mediaId,
+                            mediaTitle: selectedSaleDetail.mediaTitle,
+                            mediaType: selectedSaleDetail.mediaType,
+                            details: selectedSaleDetail.details,
+                            salePrice: selectedSaleDetail.salePrice,
+                            purchasePrice: selectedSaleDetail.purchasePrice,
+                            filePath: (selectedSaleDetail as any).filePath || '',
+                            videoPaths: (selectedSaleDetail as any).videoPaths || []
+                          };
+                          const progressInfo = copyProgress[legacyItem.id];
+                          const hasPath = !!getMediaPaths(legacyItem).length;
+                          return (
+                            <tr className="text-gray-950">
+                              <td className="p-2 border-l border-slate-200 font-mono">#{selectedSaleDetail.mediaId.slice(-4).toUpperCase()}</td>
+                              <td className="p-2 border-l border-slate-200 font-bold text-indigo-950">{selectedSaleDetail.mediaTitle}</td>
+                              <td className="p-2 border-l border-slate-200 text-gray-500">{selectedSaleDetail.details}</td>
+                              <td className="p-2 text-left font-mono border-l border-slate-200 font-bold">{formatCurrency(selectedSaleDetail.salePrice)}</td>
+                              <td className="p-2 text-center no-print bg-gray-50/50">
+                                <div className="flex flex-col items-center gap-1.5">
+                                  <div className="flex items-center gap-1 justify-center">
+                                    {hasPath ? (
+                                      <>
+                                        <button
+                                          onClick={() => {
+                                            const paths = getMediaPaths(legacyItem);
+                                            if (paths.length > 0) handleOpenFolder(paths[0]);
+                                          }}
+                                          className="px-1.5 py-1 bg-indigo-50 hover:bg-indigo-100 text-indigo-700 rounded text-[9px] font-black flex items-center gap-0.5 cursor-pointer transition-colors"
+                                          title="باز کردن پوشه"
+                                        >
+                                          <FolderOpen className="w-3 h-3" />
+                                          <span>پوشه</span>
+                                        </button>
+                                        
+                                        <button
+                                          onClick={() => copySaleItemToUsb(legacyItem)}
+                                          disabled={progressInfo && !progressInfo.completed && !progressInfo.error}
+                                          className={`px-1.5 py-1 rounded text-[9px] font-black flex items-center gap-0.5 cursor-pointer transition-all ${progressInfo?.completed ? 'bg-emerald-500/10 text-emerald-600 hover:bg-emerald-500/20' : 'bg-blue-600 hover:bg-blue-700 text-white disabled:opacity-80'}`}
+                                          title="کپی مستقیم به فلش"
+                                        >
+                                          {progressInfo?.completed ? (
+                                            <>
+                                              <Check className="w-3 h-3 text-emerald-600" />
+                                              <span>کپی شد</span>
+                                            </>
+                                          ) : progressInfo && !progressInfo.completed && !progressInfo.error ? (
+                                            <>
+                                              <span className="w-2.5 h-2.5 rounded-full border-2 border-white border-t-transparent animate-spin inline-block"></span>
+                                              <span>% {progressInfo.progress}</span>
+                                            </>
+                                          ) : (
+                                            <span>کپی به فلش</span>
+                                          )}
+                                        </button>
+                                      </>
+                                    ) : (
+                                      <span className="text-gray-400 text-[8.5px] font-bold">بدون فایل</span>
+                                    )}
+                                  </div>
+                                  
+                                  {progressInfo && (
+                                    <div className="w-full max-w-[120px] text-center">
+                                      <div className="w-full bg-gray-200 dark:bg-slate-700 h-1 rounded overflow-hidden">
+                                        <div 
+                                          className={`h-full ${progressInfo.error ? 'bg-red-500' : progressInfo.completed ? 'bg-emerald-500' : 'bg-blue-500'}`}
+                                          style={{ width: `${progressInfo.progress}%` }}
+                                        ></div>
+                                      </div>
+                                    </div>
+                                  )}
+                                </div>
+                              </td>
+                            </tr>
+                          );
+                        })()
                       )}
                     </tbody>
                   </table>
@@ -486,7 +960,26 @@ export default function SalesPage() {
             </div>
 
             {/* Modal Action Panel Bottom (Prominent close option) */}
-            <div className="px-5 py-3.5 bg-gray-50 dark:bg-slate-850 border-t border-gray-150 dark:border-gray-800 flex justify-end shrink-0 no-print">
+            <div className="px-5 py-3.5 bg-gray-50 dark:bg-slate-850 border-t border-gray-150 dark:border-gray-800 flex items-center justify-between gap-3 shrink-0 no-print">
+              <button
+                type="button"
+                onClick={handleCopyAllToUsb}
+                disabled={isCopyingAll}
+                className="px-4 py-1.5 bg-gradient-to-r from-blue-600 to-indigo-600 hover:from-blue-700 hover:to-indigo-700 text-white rounded-lg text-xs font-black transition-all shadow-md flex items-center gap-1.5 cursor-pointer disabled:opacity-50"
+              >
+                {isCopyingAll ? (
+                  <>
+                    <RefreshCw className="w-3.5 h-3.5 animate-spin" />
+                    <span>در حال کپی گروهی...</span>
+                  </>
+                ) : (
+                  <>
+                    <Copy className="w-3.5 h-3.5" />
+                    <span>کپی گروهی همه اقلام فاکتور به فلش</span>
+                  </>
+                )}
+              </button>
+
               <button 
                 onClick={() => setSelectedSaleDetail(null)}
                 className="px-5 py-1.5 bg-gray-200 hover:bg-gray-250 dark:bg-slate-800 dark:hover:bg-slate-705 text-gray-650 dark:text-gray-200 rounded-lg text-xs font-bold transition-all cursor-pointer"
