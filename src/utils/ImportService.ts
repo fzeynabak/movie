@@ -29,55 +29,17 @@ export class ImportService {
     const defaultMoviePrice = settings?.defaultMoviePrice || 2000;
     const defaultSeriesPrice = settings?.defaultSeriesPrice || 1500;
 
-    // Cache to avoid searching TMDb and downloading posters multiple times for the same series folder or name
+    // Cache to avoid searching TMDb and downloading posters multiple times for the same series folder
     const seriesFolderCache = new Map<string, any>();
 
     for (const item of selectedItems) {
       try {
-        // If series, try to reconstruct dummy TMDb match from existing series in DB first to be fully offline and avoid downloads
-        if (item.parsed.isSeries && !item.tmdb) {
-          const parsedSeries = item.parsed as ParsedSeries;
-          const seriesNameKey = parsedSeries.seriesName.trim();
-          const existingSeriesList = dbService.getSeries();
-          const dbSeriesItem = existingSeriesList.find(s => 
-            s.titleFa.toLowerCase().trim() === seriesNameKey.toLowerCase() ||
-            s.titleEn.toLowerCase().trim() === seriesNameKey.toLowerCase()
-          );
-
-          if (dbSeriesItem) {
-            item.tmdb = {
-              id: dbSeriesItem.officialSite ? parseInt(dbSeriesItem.officialSite.split('/').pop() || '0', 10) : 0,
-              title: dbSeriesItem.titleFa,
-              originalTitle: dbSeriesItem.titleEn,
-              posterPath: dbSeriesItem.poster,
-              backdropPath: dbSeriesItem.poster,
-              overview: dbSeriesItem.summary,
-              releaseDate: dbSeriesItem.year,
-              rating: parseFloat(dbSeriesItem.imdbRating) || 0.0,
-              genres: dbSeriesItem.genres || [],
-              cast: dbSeriesItem.actors ? dbSeriesItem.actors.split(', ') : [],
-              director: dbSeriesItem.director ? dbSeriesItem.director.split(', ') : [],
-              runtime: parseInt(dbSeriesItem.episodeDuration) || 45,
-              countries: [dbSeriesItem.country || ''],
-              gallery: dbSeriesItem.gallery || [],
-              voteCount: 0,
-              productionCompanies: [],
-              mediaType: 'tv'
-            };
+        // If series and folder already processed, reuse the downloaded tmdb data
+        if (item.parsed.isSeries && seriesFolderCache.has(item.file.folder)) {
+          const cachedTmdb = seriesFolderCache.get(item.file.folder);
+          if (cachedTmdb) {
+            item.tmdb = JSON.parse(JSON.stringify(cachedTmdb));
             item.matchStatus = 'matched';
-          }
-        }
-
-        // If series, we can also check the in-memory cache keyed by series name
-        if (item.parsed.isSeries) {
-          const parsedSeries = item.parsed as ParsedSeries;
-          const sKey = parsedSeries.seriesName.toLowerCase().trim();
-          if (seriesFolderCache.has(sKey)) {
-            const cachedTmdb = seriesFolderCache.get(sKey);
-            if (cachedTmdb) {
-              item.tmdb = JSON.parse(JSON.stringify(cachedTmdb));
-              item.matchStatus = 'matched';
-            }
           }
         }
 
@@ -126,11 +88,9 @@ export class ImportService {
                 }
               }
 
-              // Store in cache for subsequent episodes using series name as key
+              // Store in cache for subsequent episodes
               if (item.parsed.isSeries) {
-                const parsedSeries = item.parsed as ParsedSeries;
-                const sKey = parsedSeries.seriesName.toLowerCase().trim();
-                seriesFolderCache.set(sKey, JSON.parse(JSON.stringify(item.tmdb)));
+                seriesFolderCache.set(item.file.folder, JSON.parse(JSON.stringify(item.tmdb)));
               }
             }
           } catch (tmdbErr) {

@@ -7,6 +7,3 @@ coverage/
 .env*
 !.env.example
 /release
-/release
-/release
-*.exe
