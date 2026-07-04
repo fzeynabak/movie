@@ -52,6 +52,23 @@ export default function SalesPage() {
   const [isCopyingAll, setIsCopyingAll] = useState(false);
   
   const currentCopyIndicesRef = React.useRef<Record<string, { current: number, total: number }>>({});
+  const cancelledCopiesRef = React.useRef<Record<string, boolean>>({});
+
+  const handleCancelCopy = async (itemId: string) => {
+    cancelledCopiesRef.current[itemId] = true;
+    if (window.electronAPI && window.electronAPI.cancelCopy) {
+      await window.electronAPI.cancelCopy(itemId);
+    }
+    setCopyProgress(prev => ({
+      ...prev,
+      [itemId]: {
+        ...prev[itemId],
+        completed: false,
+        error: 'عملیات کپی توسط اپراتور لغو شد.'
+      }
+    }));
+    showToast('عملیات کپی لغو شد.', 'info');
+  };
 
   useEffect(() => {
     if (window.electronAPI && window.electronAPI.onCopyProgress) {
@@ -188,6 +205,9 @@ export default function SalesPage() {
       return false;
     }
     
+    // Clear cancelled state
+    cancelledCopiesRef.current[item.id] = false;
+
     setCopyProgress(prev => ({
       ...prev,
       [item.id]: {
@@ -204,6 +224,11 @@ export default function SalesPage() {
     if (window.electronAPI && window.electronAPI.copyFileToUsb) {
       let copyCount = 0;
       for (let i = 0; i < pathsToCopy.length; i++) {
+        // Instant abort if cancelled by user
+        if (cancelledCopiesRef.current[item.id]) {
+          break;
+        }
+
         const sourcePath = pathsToCopy[i];
         currentCopyIndicesRef.current[item.id].current = i;
         
@@ -213,12 +238,14 @@ export default function SalesPage() {
         let alreadyExists = false;
         if (window.electronAPI.existsFile) {
           try {
-            const checkRes = await window.electronAPI.existsFile(absoluteDestPath);
-            if (checkRes && checkRes.exists) {
+            const destCheck = await window.electronAPI.existsFile(absoluteDestPath);
+            const sourceCheck = await window.electronAPI.existsFile(sourcePath);
+            // Verify BOTH exists and the sizes match exactly
+            if (destCheck && destCheck.exists && sourceCheck && sourceCheck.exists && destCheck.size === sourceCheck.size) {
               alreadyExists = true;
             }
           } catch (err) {
-            console.error('Error checking file existence:', err);
+            console.error('Error checking file existence and size:', err);
           }
         }
         
@@ -242,6 +269,10 @@ export default function SalesPage() {
         try {
           const res = await window.electronAPI.copyFileToUsb(sourcePath, destDir, item.id, customRelativePath);
           if (res && !res.success) {
+            // Check if failure is due to user abort
+            if (cancelledCopiesRef.current[item.id]) {
+              break;
+            }
             setCopyProgress(prev => ({
               ...prev,
               [item.id]: {
@@ -254,6 +285,9 @@ export default function SalesPage() {
             return false;
           }
         } catch (err) {
+          if (cancelledCopiesRef.current[item.id]) {
+            break;
+          }
           setCopyProgress(prev => ({
             ...prev,
             [item.id]: {
@@ -267,6 +301,10 @@ export default function SalesPage() {
         }
       }
       
+      if (cancelledCopiesRef.current[item.id]) {
+        return false;
+      }
+
       setCopyProgress(prev => ({
         ...prev,
         [item.id]: {
@@ -824,6 +862,17 @@ export default function SalesPage() {
                                             <span>کپی به فلش</span>
                                           )}
                                         </button>
+
+                                        {progressInfo && !progressInfo.completed && !progressInfo.error && (
+                                          <button
+                                            type="button"
+                                            onClick={() => handleCancelCopy(item.id)}
+                                            className="px-1.5 py-1 bg-red-50 hover:bg-red-100 text-red-600 rounded text-[9px] font-black flex items-center justify-center cursor-pointer transition-colors animate-pulse ml-1"
+                                            title="لغو کپی"
+                                          >
+                                            <X className="w-3 h-3" />
+                                          </button>
+                                        )}
                                       </>
                                     ) : (
                                       <span className="text-gray-400 text-[8.5px] font-bold">بدون فایل</span>
@@ -903,6 +952,17 @@ export default function SalesPage() {
                                             <span>کپی به فلش</span>
                                           )}
                                         </button>
+
+                                        {progressInfo && !progressInfo.completed && !progressInfo.error && (
+                                          <button
+                                            type="button"
+                                            onClick={() => handleCancelCopy(legacyItem.id)}
+                                            className="px-1.5 py-1 bg-red-50 hover:bg-red-100 text-red-600 rounded text-[9px] font-black flex items-center justify-center cursor-pointer transition-colors animate-pulse ml-1"
+                                            title="لغو کپی"
+                                          >
+                                            <X className="w-3 h-3" />
+                                          </button>
+                                        )}
                                       </>
                                     ) : (
                                       <span className="text-gray-400 text-[8.5px] font-bold">بدون فایل</span>

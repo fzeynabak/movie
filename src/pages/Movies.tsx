@@ -35,7 +35,9 @@ import {
   Sparkles,
   Globe,
   Download,
-  Network
+  Network,
+  Grid,
+  List
 } from 'lucide-react';
 
 export const CATEGORIES: MediaCategory[] = ['ایرانی', 'خارجی', 'انیمیشن', 'کره‌ای', 'هندی', 'متفرقه'];
@@ -93,6 +95,17 @@ export default function Movies({
   const [pageSize, setPageSize] = useState(20);
   const [showFormModal, setShowFormModal] = useState(false);
 
+  // Advanced List and Card View Toggle State
+  const [viewMode, setViewMode] = useState<'card' | 'list'>('card');
+  const [colFilters, setColFilters] = useState<Record<string, string>>({
+    titleFa: '',
+    titleEn: '',
+    quality: '',
+    imdbRating: '',
+    year: '',
+    category: ''
+  });
+
   // Form Fields State
   const [formCategory, setFormCategory] = useState<MediaCategory>('ایرانی');
   const [formTitleFa, setFormTitleFa] = useState('');
@@ -137,11 +150,39 @@ export default function Movies({
     backdrop: string;
     gallery: string[];
   }>({ poster: '', backdrop: '', gallery: [] });
-  const [selectedImagesToDownload, setSelectedImagesToDownload] = useState<{
-    poster: boolean;
-    backdrop: boolean;
-    gallery: boolean[];
-  }>({ poster: true, backdrop: true, gallery: [] });
+  const [imageAssignments, setImageAssignments] = useState<{
+    poster: 'poster' | 'gallery' | 'none';
+    backdrop: 'poster' | 'gallery' | 'none';
+    gallery: ('poster' | 'gallery' | 'none')[];
+  }>({ poster: 'poster', backdrop: 'gallery', gallery: [] });
+
+  const assignImageRole = (type: 'poster' | 'backdrop' | number, role: 'poster' | 'gallery' | 'none') => {
+    setImageAssignments(prev => {
+      let nextPoster = prev.poster;
+      let nextBackdrop = prev.backdrop;
+      let nextGallery = [...prev.gallery];
+
+      if (role === 'poster') {
+        if (nextPoster === 'poster') nextPoster = 'gallery';
+        if (nextBackdrop === 'poster') nextBackdrop = 'gallery';
+        nextGallery = nextGallery.map(g => g === 'poster' ? 'gallery' : g);
+      }
+
+      if (type === 'poster') {
+        nextPoster = role;
+      } else if (type === 'backdrop') {
+        nextBackdrop = role;
+      } else {
+        nextGallery[type] = role;
+      }
+
+      return {
+        poster: nextPoster,
+        backdrop: nextBackdrop,
+        gallery: nextGallery
+      };
+    });
+  };
   const [downloadDestFolder, setDownloadDestFolder] = useState('');
   const [isDownloadingImages, setIsDownloadingImages] = useState(false);
 
@@ -178,67 +219,69 @@ export default function Movies({
     showToast('در حال دریافت و ذخیره تصاویر انتخابی در پوشه...');
     
     try {
+      const isWindows = downloadDestFolder.includes('\\');
+      const picFolder = downloadDestFolder.trim() + (isWindows ? '\\pic' : '/pic');
+
+      // Identify which image is assigned as poster and which are gallery
+      let posterUrlToDownload = '';
+      const galleryUrlsToDownload: string[] = [];
+
+      if (fetchedImages.poster) {
+        if (imageAssignments.poster === 'poster') {
+          posterUrlToDownload = fetchedImages.poster;
+        } else if (imageAssignments.poster === 'gallery') {
+          galleryUrlsToDownload.push(fetchedImages.poster);
+        }
+      }
+
+      if (fetchedImages.backdrop) {
+        if (imageAssignments.backdrop === 'poster') {
+          posterUrlToDownload = fetchedImages.backdrop;
+        } else if (imageAssignments.backdrop === 'gallery') {
+          galleryUrlsToDownload.push(fetchedImages.backdrop);
+        }
+      }
+
+      fetchedImages.gallery.forEach((url, idx) => {
+        const role = imageAssignments.gallery[idx];
+        if (role === 'poster') {
+          posterUrlToDownload = url;
+        } else if (role === 'gallery') {
+          galleryUrlsToDownload.push(url);
+        }
+      });
+
       if (window.electronAPI && window.electronAPI.savePosterLocal) {
-        const isWindows = downloadDestFolder.includes('\\');
-        const picFolder = downloadDestFolder.trim() + (isWindows ? '\\pic' : '/pic');
-        
-        let posterLocalPath = '';
-        if (selectedImagesToDownload.poster && fetchedImages.poster) {
-          const res = await window.electronAPI.savePosterLocal(fetchedImages.poster, picFolder, 'poster');
+        if (posterUrlToDownload) {
+          const res = await window.electronAPI.savePosterLocal(posterUrlToDownload, picFolder, 'poster');
           if (res && res.success) {
-            posterLocalPath = res.savedPath;
             setFormPoster(res.savedPath);
           } else {
             console.error('Failed to download poster:', res?.error);
+            setFormPoster(posterUrlToDownload);
           }
-        }
-        
-        let backdropLocalPath = '';
-        if (selectedImagesToDownload.backdrop && fetchedImages.backdrop) {
-          const res = await window.electronAPI.savePosterLocal(fetchedImages.backdrop, picFolder, 'backdrop');
-          if (res && res.success) {
-            backdropLocalPath = res.savedPath;
-          } else {
-            console.error('Failed to download backdrop:', res?.error);
-          }
+        } else {
+          setFormPoster('');
         }
 
         const localGallery: string[] = [];
-        if (backdropLocalPath) {
-          localGallery.push(backdropLocalPath);
-        }
-        
-        for (let i = 0; i < fetchedImages.gallery.length; i++) {
-          if (selectedImagesToDownload.gallery[i]) {
-            const imgUrl = fetchedImages.gallery[i];
-            const res = await window.electronAPI.savePosterLocal(imgUrl, picFolder, `gallery_${i + 1}`);
-            if (res && res.success) {
-              localGallery.push(res.savedPath);
-            }
+        for (let i = 0; i < galleryUrlsToDownload.length; i++) {
+          const imgUrl = galleryUrlsToDownload[i];
+          const res = await window.electronAPI.savePosterLocal(imgUrl, picFolder, `gallery_${i + 1}`);
+          if (res && res.success) {
+            localGallery.push(res.savedPath);
+          } else {
+            localGallery.push(imgUrl);
           }
         }
 
-        if (localGallery.length > 0) {
-          setFormGallery(localGallery.join(','));
-        }
-        
+        setFormGallery(localGallery.join(','));
         showToast('تمام تصاویر انتخابی با موفقیت ذخیره و به فرم متصل شدند.');
         setShowImagePickerModal(false);
       } else {
         // Fallback for online preview
-        if (selectedImagesToDownload.poster) {
-          setFormPoster(fetchedImages.poster);
-        }
-        const galleryUrls: string[] = [];
-        if (selectedImagesToDownload.backdrop && fetchedImages.backdrop) {
-          galleryUrls.push(fetchedImages.backdrop);
-        }
-        fetchedImages.gallery.forEach((url, idx) => {
-          if (selectedImagesToDownload.gallery[idx]) {
-            galleryUrls.push(url);
-          }
-        });
-        setFormGallery(galleryUrls.join(','));
+        setFormPoster(posterUrlToDownload);
+        setFormGallery(galleryUrlsToDownload.join(','));
         showToast('تصاویر انتخابی (آدرس‌های اینترنتی) به فیلدهای مربوطه متصل شدند.');
         setShowImagePickerModal(false);
       }
@@ -354,10 +397,10 @@ export default function Movies({
       backdrop: metadata.backdropPath || '',
       gallery: galleryImages
     });
-    setSelectedImagesToDownload({
-      poster: !!metadata.posterPath,
-      backdrop: !!metadata.backdropPath,
-      gallery: galleryImages.map(() => true)
+    setImageAssignments({
+      poster: metadata.posterPath ? 'poster' : 'none',
+      backdrop: metadata.backdropPath ? 'gallery' : 'none',
+      gallery: galleryImages.map(() => 'gallery')
     });
 
     showToast('مشخصات متنی فیلم دریافت شد. لطفاً تصاویر مورد نیاز را تایید و ذخیره کنید.');
@@ -859,7 +902,11 @@ export default function Movies({
       window.electronAPI.selectFile().then((path: string) => {
         if (path) {
           setFormFilePath(path);
-          triggerAutoTmdbSearchFromFile(path);
+          if (!formTitleFa.trim() && !formTitleEn.trim()) {
+            triggerAutoTmdbSearchFromFile(path);
+          } else {
+            showToast('مسیر فیزیکی فایل ثبت شد بدون تغییر اطلاعات از قبل دریافت شده فیلم.', 'info');
+          }
         }
       }).catch((err: any) => {
         console.error('Failed to select file natively:', err);
@@ -1111,7 +1158,8 @@ export default function Movies({
 
   // Filter & Search Logic
   const filteredMovies = movies.filter(movie => {
-    const matchesCategory = selectedCategory === 'همه' || movie.category === selectedCategory;
+    const movieCats = movie.category ? movie.category.split(',').map(c => c.trim()) : [];
+    const matchesCategory = selectedCategory === 'همه' || movieCats.includes(selectedCategory);
     const matchesSearch = 
       movie.titleFa.toLowerCase().includes(searchQuery.toLowerCase()) ||
       movie.titleEn.toLowerCase().includes(searchQuery.toLowerCase()) ||
@@ -1133,7 +1181,16 @@ export default function Movies({
       movie.actors.toLowerCase().includes(filterCrew.toLowerCase()) ||
       (movie.writer && movie.writer.toLowerCase().includes(filterCrew.toLowerCase()));
 
-    return matchesCategory && matchesSearch && matchesCountry && matchesLanguage && matchesGenre && matchesYear && matchesQuality && matchesMinImdb && matchesCrew;
+    // Advanced Column-Header Filters
+    const matchesColTitleFa = !colFilters.titleFa || movie.titleFa.toLowerCase().includes(colFilters.titleFa.toLowerCase());
+    const matchesColTitleEn = !colFilters.titleEn || movie.titleEn.toLowerCase().includes(colFilters.titleEn.toLowerCase());
+    const matchesColQuality = !colFilters.quality || movie.quality.toLowerCase().includes(colFilters.quality.toLowerCase());
+    const matchesColImdb = !colFilters.imdbRating || movie.imdbRating.toLowerCase().includes(colFilters.imdbRating.toLowerCase());
+    const matchesColYear = !colFilters.year || movie.year.toLowerCase().includes(colFilters.year.toLowerCase());
+    const matchesColCategory = !colFilters.category || (movie.category || '').toLowerCase().includes(colFilters.category.toLowerCase());
+
+    return matchesCategory && matchesSearch && matchesCountry && matchesLanguage && matchesGenre && matchesYear && matchesQuality && matchesMinImdb && matchesCrew &&
+      matchesColTitleFa && matchesColTitleEn && matchesColQuality && matchesColImdb && matchesColYear && matchesColCategory;
   });
 
   // Sorting
@@ -1190,36 +1247,68 @@ export default function Movies({
         </div>
       </div>
 
-      {/* Categories Tabs Selector */}
-      <div className="flex items-center overflow-x-auto gap-2 pb-1 scrollbar-none" id="movies-category-selector">
-        <button
-          onClick={() => { setSelectedCategory('همه'); setCurrentPage(1); }}
-          className={`px-4 py-2 text-xs font-semibold rounded-lg shrink-0 transition-colors cursor-pointer ${
-            selectedCategory === 'همه' 
-              ? 'bg-gray-900 text-white dark:bg-white dark:text-gray-950' 
-              : 'bg-white text-gray-700 hover:bg-gray-50 border border-gray-150 dark:bg-[#1e293b] dark:text-gray-300 dark:border-gray-800 dark:hover:bg-slate-800'
-          }`}
-          id="cat-tab-all"
-        >
-          همه فیلم‌ها ({toPersianNums(movies.length)})
-        </button>
-        {CATEGORIES.map(cat => {
-          const catCount = movies.filter(m => m.category === cat).length;
-          return (
-            <button
-              key={cat}
-              onClick={() => { setSelectedCategory(cat); setCurrentPage(1); }}
-              className={`px-4 py-2 text-xs font-semibold rounded-lg shrink-0 transition-colors cursor-pointer ${
-                selectedCategory === cat 
-                  ? 'bg-indigo-600 text-white' 
-                  : 'bg-white text-gray-700 hover:bg-gray-50 border border-gray-150 dark:bg-[#1e293b] dark:text-gray-300 dark:border-gray-800 dark:hover:bg-slate-800'
-              }`}
-              id={`cat-tab-${cat}`}
-            >
-              {cat} ({toPersianNums(catCount)})
-            </button>
-          );
-        })}
+      {/* Categories Tabs Selector and View Switcher */}
+      <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3 border-b border-gray-150 dark:border-gray-800 pb-2" id="movies-category-selector-wrapper">
+        <div className="flex items-center overflow-x-auto gap-2 pb-1 scrollbar-none" id="movies-category-selector">
+          <button
+            onClick={() => { setSelectedCategory('all'); setSelectedCategory('همه'); setCurrentPage(1); }}
+            className={`px-4 py-2 text-xs font-semibold rounded-lg shrink-0 transition-colors cursor-pointer ${
+              selectedCategory === 'همه' 
+                ? 'bg-gray-900 text-white dark:bg-white dark:text-gray-950' 
+                : 'bg-white text-gray-700 hover:bg-gray-50 border border-gray-150 dark:bg-[#1e293b] dark:text-gray-300 dark:border-gray-800 dark:hover:bg-slate-800'
+            }`}
+            id="cat-tab-all"
+          >
+            همه فیلم‌ها ({toPersianNums(movies.length)})
+          </button>
+          {CATEGORIES.map(cat => {
+            const catCount = movies.filter(m => m.category && m.category.split(',').map(c => c.trim()).includes(cat)).length;
+            return (
+              <button
+                key={cat}
+                onClick={() => { setSelectedCategory(cat); setCurrentPage(1); }}
+                className={`px-4 py-2 text-xs font-semibold rounded-lg shrink-0 transition-colors cursor-pointer ${
+                  selectedCategory === cat 
+                    ? 'bg-indigo-600 text-white' 
+                    : 'bg-white text-gray-700 hover:bg-gray-50 border border-gray-150 dark:bg-[#1e293b] dark:text-gray-300 dark:border-gray-800 dark:hover:bg-slate-800'
+                }`}
+                id={`cat-tab-${cat}`}
+              >
+                {cat} ({toPersianNums(catCount)})
+              </button>
+            );
+          })}
+        </div>
+
+        {/* Beautiful Segmented Toggle for Card vs Advanced List View */}
+        <div className="flex items-center gap-1 bg-gray-100 dark:bg-slate-800 p-1 rounded-lg shrink-0 border border-gray-200 dark:border-slate-700/50 self-end sm:self-auto shadow-inner">
+          <button
+            type="button"
+            onClick={() => setViewMode('card')}
+            className={`flex items-center gap-1.5 px-3 py-1.5 rounded-md text-xs font-bold transition-all cursor-pointer ${
+              viewMode === 'card' 
+                ? 'bg-white dark:bg-slate-700 text-indigo-600 dark:text-white shadow-sm' 
+                : 'text-gray-500 hover:text-gray-700 dark:text-gray-400 dark:hover:text-gray-200'
+            }`}
+            title="نمای کارتی"
+          >
+            <Grid className="w-3.5 h-3.5" />
+            <span>نمای کارتی</span>
+          </button>
+          <button
+            type="button"
+            onClick={() => setViewMode('list')}
+            className={`flex items-center gap-1.5 px-3 py-1.5 rounded-md text-xs font-bold transition-all cursor-pointer ${
+              viewMode === 'list' 
+                ? 'bg-white dark:bg-slate-700 text-indigo-600 dark:text-white shadow-sm' 
+                : 'text-gray-500 hover:text-gray-700 dark:text-gray-400 dark:hover:text-gray-200'
+            }`}
+            title="نمای لیستی پیشرفته با فیلتر سرستون"
+          >
+            <List className="w-3.5 h-3.5" />
+            <span>نمای لیستی پیشرفته</span>
+          </button>
+        </div>
       </div>
 
       {/* Advanced Filter and Search Controls */}
@@ -1427,7 +1516,7 @@ export default function Movies({
           <h3 className="text-sm font-bold text-gray-800 dark:text-gray-200">کوششی با فیلتر شما یافت نشد!</h3>
           <p className="text-xs text-gray-400 mt-1">مدیا سنتر آرشیوی ندارد یا فیلتر خیلی سختی اعمال کرده‌اید.</p>
         </div>
-      ) : (
+      ) : viewMode === 'card' ? (
         <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-4 lg:grid-cols-5 gap-5" id="movies-grid">
           {paginatedMovies.map(movie => (
             <div
@@ -1446,9 +1535,13 @@ export default function Movies({
                 />
                 
                 {/* Category tag */}
-                <span className="absolute top-2 right-2 bg-indigo-600 text-white text-[10px] font-bold px-2 py-0.5 rounded shadow-md z-10">
-                  {movie.category}
-                </span>
+                <div className="absolute top-2 right-2 flex flex-wrap gap-1 z-10 max-w-[85%]">
+                  {(movie.category || 'متفرقه').split(',').map(cat => (
+                    <span key={cat} className="bg-indigo-600 text-white text-[9px] font-bold px-1.5 py-0.5 rounded shadow-md shrink-0">
+                      {cat.trim()}
+                    </span>
+                  ))}
+                </div>
 
                 {/* IMDb Rating Badge */}
                 <span className="absolute bottom-2 right-2 bg-black/75 text-amber-500 text-[10px] font-mono font-bold px-1.5 py-0.5 rounded shadow-md z-10">
@@ -1556,20 +1649,239 @@ export default function Movies({
                   >
                     <Edit className="w-3.5 h-3.5" />
                   </button>
-                <button
-                  onClick={(e) => handleDeleteMovie(movie.id, e)}
-                  className="p-1 text-gray-405 hover:text-red-600 transition-colors"
-                  title="حذف فیلم"
-                  id={`delete-movie-${movie.id}`}
-                >
-                  <Trash2 className="w-3.5 h-3.5" />
-                </button>
+                  <button
+                    onClick={(e) => handleDeleteMovie(movie.id, e)}
+                    className="p-1 text-gray-405 hover:text-red-600 transition-colors"
+                    title="حذف فیلم"
+                    id={`delete-movie-${movie.id}`}
+                  >
+                    <Trash2 className="w-3.5 h-3.5" />
+                  </button>
+                </div>
               </div>
             </div>
-          </div>
-        ))}
-      </div>
-    )}
+          ))}
+        </div>
+      ) : (
+        <div className="overflow-x-auto bg-white dark:bg-[#1e293b] border border-gray-150 dark:border-slate-800 rounded-xl shadow-sm" id="movies-list-table-container">
+          <table className="w-full text-right border-collapse text-xs" dir="rtl">
+            <thead>
+              <tr className="bg-gray-50 dark:bg-[#141d2e] border-b border-gray-200 dark:border-slate-800 text-gray-500 dark:text-gray-400">
+                <th className="p-3 w-16 text-center font-bold">پوستر</th>
+                
+                <th className="p-3 min-w-[150px]">
+                  <div className="flex flex-col">
+                    <button 
+                      type="button"
+                      onClick={() => { setSortBy('titleFa'); setSortOrder(sortOrder === 'desc' ? 'asc' : 'desc'); }}
+                      className="flex items-center gap-1 font-bold text-gray-700 dark:text-gray-300 hover:text-indigo-600 transition-colors cursor-pointer"
+                    >
+                      <span>عنوان فارسی</span>
+                      {sortBy === 'titleFa' && (sortOrder === 'desc' ? '▼' : '▲')}
+                    </button>
+                    <input
+                      type="text"
+                      value={colFilters.titleFa}
+                      onChange={(e) => setColFilters(prev => ({ ...prev, titleFa: e.target.value }))}
+                      placeholder="فیلتر..."
+                      className="h-7 bg-white dark:bg-slate-850 border border-gray-200 dark:border-slate-700 rounded text-[10px] px-1.5 mt-1.5 focus:outline-none focus:ring-1 focus:ring-indigo-500 font-normal w-full"
+                    />
+                  </div>
+                </th>
+
+                <th className="p-3 min-w-[150px]">
+                  <div className="flex flex-col">
+                    <button 
+                      type="button"
+                      onClick={() => { setSortBy('titleEn' as any); setSortOrder(sortOrder === 'desc' ? 'asc' : 'desc'); }}
+                      className="flex items-center gap-1 font-bold text-gray-700 dark:text-gray-300 hover:text-indigo-600 transition-colors cursor-pointer"
+                    >
+                      <span>عنوان انگلیسی</span>
+                      {sortBy === ('titleEn' as any) && (sortOrder === 'desc' ? '▼' : '▲')}
+                    </button>
+                    <input
+                      type="text"
+                      value={colFilters.titleEn}
+                      onChange={(e) => setColFilters(prev => ({ ...prev, titleEn: e.target.value }))}
+                      placeholder="فیلتر..."
+                      className="h-7 bg-white dark:bg-slate-850 border border-gray-200 dark:border-slate-700 rounded text-[10px] px-1.5 mt-1.5 focus:outline-none focus:ring-1 focus:ring-indigo-500 font-normal w-full"
+                    />
+                  </div>
+                </th>
+
+                <th className="p-3 min-w-[100px]">
+                  <div className="flex flex-col">
+                    <button 
+                      type="button"
+                      onClick={() => { setSortBy('quality' as any); setSortOrder(sortOrder === 'desc' ? 'asc' : 'desc'); }}
+                      className="flex items-center gap-1 font-bold text-gray-700 dark:text-gray-300 hover:text-indigo-600 transition-colors cursor-pointer"
+                    >
+                      <span>کیفیت</span>
+                      {sortBy === ('quality' as any) && (sortOrder === 'desc' ? '▼' : '▲')}
+                    </button>
+                    <input
+                      type="text"
+                      value={colFilters.quality}
+                      onChange={(e) => setColFilters(prev => ({ ...prev, quality: e.target.value }))}
+                      placeholder="فیلتر..."
+                      className="h-7 bg-white dark:bg-slate-850 border border-gray-200 dark:border-slate-700 rounded text-[10px] px-1.5 mt-1.5 focus:outline-none focus:ring-1 focus:ring-indigo-500 font-normal w-full"
+                    />
+                  </div>
+                </th>
+
+                <th className="p-3 min-w-[80px]">
+                  <div className="flex flex-col">
+                    <button 
+                      type="button"
+                      onClick={() => { setSortBy('imdbRating'); setSortOrder(sortOrder === 'desc' ? 'asc' : 'desc'); }}
+                      className="flex items-center gap-1 font-bold text-gray-700 dark:text-gray-300 hover:text-indigo-600 transition-colors cursor-pointer"
+                    >
+                      <span>امتیاز IMDb</span>
+                      {sortBy === 'imdbRating' && (sortOrder === 'desc' ? '▼' : '▲')}
+                    </button>
+                    <input
+                      type="text"
+                      value={colFilters.imdbRating}
+                      onChange={(e) => setColFilters(prev => ({ ...prev, imdbRating: e.target.value }))}
+                      placeholder="فیلتر..."
+                      className="h-7 bg-white dark:bg-slate-850 border border-gray-200 dark:border-slate-700 rounded text-[10px] px-1.5 mt-1.5 focus:outline-none focus:ring-1 focus:ring-indigo-500 font-normal w-full"
+                    />
+                  </div>
+                </th>
+
+                <th className="p-3 min-w-[80px]">
+                  <div className="flex flex-col">
+                    <button 
+                      type="button"
+                      onClick={() => { setSortBy('year'); setSortOrder(sortOrder === 'desc' ? 'asc' : 'desc'); }}
+                      className="flex items-center gap-1 font-bold text-gray-700 dark:text-gray-300 hover:text-indigo-600 transition-colors cursor-pointer"
+                    >
+                      <span>سال ساخت</span>
+                      {sortBy === 'year' && (sortOrder === 'desc' ? '▼' : '▲')}
+                    </button>
+                    <input
+                      type="text"
+                      value={colFilters.year}
+                      onChange={(e) => setColFilters(prev => ({ ...prev, year: e.target.value }))}
+                      placeholder="فیلتر..."
+                      className="h-7 bg-white dark:bg-slate-850 border border-gray-200 dark:border-slate-700 rounded text-[10px] px-1.5 mt-1.5 focus:outline-none focus:ring-1 focus:ring-indigo-500 font-normal w-full"
+                    />
+                  </div>
+                </th>
+
+                <th className="p-3 min-w-[100px]">
+                  <div className="flex flex-col">
+                    <span className="font-bold text-gray-700 dark:text-gray-300">دسته‌بندی</span>
+                    <input
+                      type="text"
+                      value={colFilters.category}
+                      onChange={(e) => setColFilters(prev => ({ ...prev, category: e.target.value }))}
+                      placeholder="فیلتر..."
+                      className="h-7 bg-white dark:bg-slate-850 border border-gray-200 dark:border-slate-700 rounded text-[10px] px-1.5 mt-1.5 focus:outline-none focus:ring-1 focus:ring-indigo-500 font-normal w-full"
+                    />
+                  </div>
+                </th>
+
+                <th className="p-3 min-w-[110px]">
+                  <button 
+                    type="button"
+                    onClick={() => { setSortBy('salePrice'); setSortOrder(sortOrder === 'desc' ? 'asc' : 'desc'); }}
+                    className="flex items-center gap-1 font-bold text-gray-700 dark:text-gray-300 hover:text-indigo-600 transition-colors cursor-pointer"
+                  >
+                    <span>قیمت فروش</span>
+                    {sortBy === 'salePrice' && (sortOrder === 'desc' ? '▼' : '▲')}
+                  </button>
+                </th>
+
+                <th className="p-3 w-[150px] text-center font-bold text-gray-700 dark:text-gray-300">عملیات</th>
+              </tr>
+            </thead>
+            <tbody>
+              {paginatedMovies.map((movie) => {
+                const defaultPrice = movie.salePrice || dbService.getSettings().defaultMoviePrice;
+                return (
+                  <tr 
+                    key={movie.id} 
+                    onClick={() => setDetailMovie(movie)}
+                    className="border-b border-gray-100 dark:border-slate-800/60 hover:bg-slate-50/55 dark:hover:bg-slate-800/40 cursor-pointer transition-colors"
+                  >
+                    <td className="p-2 text-center">
+                      <div className="w-10 h-14 rounded overflow-hidden mx-auto shadow-sm">
+                        <img 
+                          src={getSafePosterUrl(movie.poster)} 
+                          alt="" 
+                          className="w-full h-full object-cover"
+                          referrerPolicy="no-referrer"
+                        />
+                      </div>
+                    </td>
+                    <td className="p-3 font-bold text-gray-900 dark:text-gray-100">{movie.titleFa}</td>
+                    <td className="p-3 text-gray-500 font-mono text-[11px]">{movie.titleEn}</td>
+                    <td className="p-3">
+                      <span className="bg-slate-100 dark:bg-slate-800 text-slate-700 dark:text-slate-300 text-[10px] px-2 py-0.5 rounded font-mono">
+                        {movie.quality}
+                      </span>
+                    </td>
+                    <td className="p-3 text-amber-500 font-mono font-bold">★ {toPersianNums(movie.imdbRating)}</td>
+                    <td className="p-3 font-mono text-gray-600 dark:text-gray-400">{toPersianNums(movie.year)}</td>
+                    <td className="p-3">
+                      <div className="flex flex-wrap gap-1">
+                        {(movie.category || 'متفرقه').split(',').map(cat => (
+                          <span key={cat} className="bg-indigo-50 dark:bg-indigo-950/30 text-indigo-600 dark:text-indigo-400 text-[9px] font-bold px-1.5 py-0.5 rounded">
+                            {cat.trim()}
+                          </span>
+                        ))}
+                      </div>
+                    </td>
+                    <td className="p-3 text-emerald-600 font-bold font-mono">
+                      {formatCurrency(defaultPrice)}
+                    </td>
+                    <td className="p-3" onClick={(e) => e.stopPropagation()}>
+                      <div className="flex items-center justify-center gap-1.5">
+                        <button
+                          onClick={() => handlePlayFile(movie.filePath, movie.originPeerIp)}
+                          className="p-1.5 bg-emerald-500 hover:bg-emerald-600 text-white rounded transition-colors"
+                          title="پخش ویدیو"
+                        >
+                          <Play className="w-3.5 h-3.5 fill-current" />
+                        </button>
+                        <button
+                          onClick={() => handleOpenFolder(movie.filePath, movie.originPeerIp)}
+                          className="p-1.5 bg-indigo-500 hover:bg-indigo-600 text-white rounded transition-colors"
+                          title="باز کردن مسیر فایل"
+                        >
+                          <FolderOpen className="w-3.5 h-3.5" />
+                        </button>
+                        <button
+                          onClick={(e) => handleOpenSale(movie, e)}
+                          className="p-1.5 bg-amber-500 hover:bg-amber-600 text-white rounded transition-colors"
+                          title="ثبت فروش"
+                        >
+                          <DollarSign className="w-3.5 h-3.5" />
+                        </button>
+                        <button
+                          onClick={(e) => handleOpenEdit(movie, e)}
+                          className="p-1.5 bg-sky-500 hover:bg-sky-600 text-white rounded transition-colors"
+                          title="ویرایش"
+                        >
+                          <Edit className="w-3.5 h-3.5" />
+                        </button>
+                        <button
+                          onClick={(e) => handleDeleteMovie(movie.id, e)}
+                          className="p-1.5 bg-red-500 hover:bg-red-600 text-white rounded transition-colors"
+                          title="حذف"
+                        >
+                          <Trash2 className="w-3.5 h-3.5" />
+                        </button>
+                      </div>
+                    </td>
+                  </tr>
+                );
+              })}
+            </tbody>
+          </table>
+        </div>
+      )}
 
       {/* Pagination controls */}
       {totalPages > 1 && (
@@ -1794,17 +2106,35 @@ export default function Movies({
                   />
                 </div>
 
-                {/* Category */}
-                <div className="space-y-1">
-                  <label className="text-[10px] font-bold text-gray-500 block">دسته اصلی فیلم *</label>
-                  <select
-                    value={formCategory}
-                    onChange={(e) => setFormCategory(e.target.value as MediaCategory)}
-                    className="w-full h-9 px-2 bg-gray-50 dark:bg-slate-800 rounded-lg text-xs border border-gray-200 dark:border-gray-700 text-gray-800 dark:text-gray-200 focus:outline-none focus:border-indigo-500 cursor-pointer"
-                    id="input-category"
-                  >
-                    {CATEGORIES.map(c => <option key={c} value={c}>{c}</option>)}
-                  </select>
+                 {/* Category */}
+                <div className="space-y-1.5 bg-gray-50/50 dark:bg-slate-800/40 p-2.5 rounded-xl border border-gray-150 dark:border-slate-800 md:col-span-1">
+                  <label className="text-[10px] font-black text-gray-500 block mb-1">دسته‌بندی‌های فیلم * (امکان انتخاب همزمان چند دسته)</label>
+                  <div className="grid grid-cols-2 gap-2">
+                    {CATEGORIES.map(c => {
+                      const currentCats = formCategory ? formCategory.split(',').map(x => x.trim()) : [];
+                      const isChecked = currentCats.includes(c);
+                      return (
+                        <label key={c} className="flex items-center gap-1.5 px-2 py-1.5 bg-white dark:bg-slate-900 border border-gray-200 dark:border-gray-750 rounded-lg cursor-pointer hover:border-indigo-500 hover:bg-indigo-50/10 transition-colors select-none text-[10.5px] font-bold text-gray-700 dark:text-gray-200">
+                          <input
+                            type="checkbox"
+                            checked={isChecked}
+                            onChange={(e) => {
+                              let updatedCats;
+                              if (e.target.checked) {
+                                updatedCats = [...currentCats.filter(x => x !== c), c];
+                              } else {
+                                updatedCats = currentCats.filter(x => x !== c);
+                              }
+                              // if empty, let's keep it as is or empty string
+                              setFormCategory(updatedCats.join(', '));
+                            }}
+                            className="w-3.5 h-3.5 text-indigo-600 rounded border-gray-300 dark:border-gray-700 focus:ring-indigo-500 cursor-pointer"
+                          />
+                          <span>{c}</span>
+                        </label>
+                      );
+                    })}
+                  </div>
                 </div>
 
                 {/* Collection Name */}
@@ -2310,7 +2640,11 @@ export default function Movies({
             <div className="p-5 flex-1 flex flex-col justify-between" id="detail-meta-column">
               <div className="space-y-3.5">
                 <div>
-                  <span className="text-[9px] bg-indigo-100 text-indigo-700 px-2 py-0.5 rounded font-bold dark:bg-indigo-950 dark:text-indigo-300">{detailMovie.category}</span>
+                <div className="flex flex-wrap gap-1">
+                  {(detailMovie.category || 'متفرقه').split(',').map(cat => (
+                    <span key={cat} className="text-[9px] bg-indigo-100 text-indigo-700 px-2 py-0.5 rounded font-bold dark:bg-indigo-950 dark:text-indigo-300 shrink-0">{cat.trim()}</span>
+                  ))}
+                </div>
                   <h2 className="text-base font-bold text-gray-900 dark:text-gray-100 mt-2">{detailMovie.titleFa}</h2>
                   <p className="text-xs text-gray-400 font-mono mt-0.5">{detailMovie.titleEn} | {toPersianNums(detailMovie.year)}</p>
                 </div>
@@ -3210,34 +3544,75 @@ export default function Movies({
 
               {/* Grid of Images to choose */}
               <div className="space-y-3">
-                <span className="text-xs font-bold text-gray-600 dark:text-gray-300 block">تصاویر موجود جهت دانلود (برای انتخاب کلیک کنید):</span>
+                <span className="text-xs font-bold text-gray-600 dark:text-gray-300 block">انتخاب و تخصیص نقش برای هر تصویر جهت دانلود و ذخیره:</span>
                 
                 <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
                   {/* Poster Column */}
                   <div className="space-y-2">
-                    <span className="text-[11px] font-bold text-gray-500 block">پوستر اصلی فیلم (Poster):</span>
+                    <span className="text-[11px] font-bold text-gray-500 block">تصویر ۱ (Poster پیش‌فرض):</span>
                     {fetchedImages.poster ? (
-                      <div 
-                        onClick={() => setSelectedImagesToDownload(prev => ({ ...prev, poster: !prev.poster }))}
-                        className={`relative aspect-[2/3] rounded-xl overflow-hidden border-2 cursor-pointer transition-all group ${
-                          selectedImagesToDownload.poster 
-                            ? 'border-indigo-600 ring-2 ring-indigo-600/30 shadow-lg' 
-                            : 'border-gray-200 dark:border-gray-800 opacity-60 hover:opacity-100'
-                        }`}
-                      >
-                        <img 
-                          src={fetchedImages.poster} 
-                          alt="Poster" 
-                          className="w-full h-full object-cover"
-                          referrerPolicy="no-referrer"
-                        />
-                        <div className={`absolute inset-0 bg-black/40 transition-all flex items-center justify-center ${selectedImagesToDownload.poster ? 'opacity-100' : 'opacity-0 group-hover:opacity-100'}`}>
-                          <div className={`w-10 h-10 rounded-full flex items-center justify-center text-white ${selectedImagesToDownload.poster ? 'bg-indigo-600' : 'bg-gray-600'}`}>
-                            <Check className="w-5 h-5" />
+                      <div className="space-y-2 bg-white dark:bg-slate-900 p-2.5 rounded-xl border border-gray-150 dark:border-slate-800">
+                        <div 
+                          className={`relative aspect-[2/3] rounded-lg overflow-hidden border-2 transition-all ${
+                            imageAssignments.poster === 'poster' ? 'border-indigo-600 shadow-md' :
+                            imageAssignments.poster === 'gallery' ? 'border-emerald-600 shadow-md' :
+                            'border-gray-200 dark:border-gray-800 opacity-45'
+                          }`}
+                        >
+                          <img 
+                            src={fetchedImages.poster} 
+                            alt="Poster" 
+                            className="w-full h-full object-cover"
+                            referrerPolicy="no-referrer"
+                          />
+                          {imageAssignments.poster === 'poster' && (
+                            <span className="absolute top-2 right-2 bg-indigo-600 text-white text-[9px] font-bold px-2 py-0.5 rounded-full shadow-md z-10">🖼️ پوستر اصلی</span>
+                          )}
+                          {imageAssignments.poster === 'gallery' && (
+                            <span className="absolute top-2 right-2 bg-emerald-600 text-white text-[9px] font-bold px-2 py-0.5 rounded-full shadow-md z-10">📷 گالری تصاویر</span>
+                          )}
+                          {imageAssignments.poster === 'none' && (
+                            <span className="absolute top-2 right-2 bg-gray-500 text-white text-[9px] font-bold px-2 py-0.5 rounded-full shadow-md z-10">❌ عدم انتخاب</span>
+                          )}
+                          <div className="absolute bottom-2 left-2 right-2 bg-black/60 backdrop-blur-sm rounded px-2 py-0.5 text-center">
+                            <span className="text-[8px] font-bold text-white font-mono">poster.jpg</span>
                           </div>
                         </div>
-                        <div className="absolute bottom-2 left-2 right-2 bg-black/60 backdrop-blur-sm rounded-lg px-2 py-1 text-center">
-                          <span className="text-[9px] font-bold text-white">نام فایل: poster.jpg</span>
+                        {/* Selector Buttons */}
+                        <div className="flex gap-1 justify-center">
+                          <button
+                            type="button"
+                            onClick={() => assignImageRole('poster', 'poster')}
+                            className={`flex-1 py-1 rounded text-[10px] font-bold transition-all cursor-pointer border-none ${
+                              imageAssignments.poster === 'poster' 
+                                ? 'bg-indigo-600 text-white shadow-sm' 
+                                : 'bg-gray-100 dark:bg-slate-800 text-gray-500 hover:bg-gray-200 dark:hover:bg-slate-700'
+                            }`}
+                          >
+                            پوستر اصلی
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() => assignImageRole('poster', 'gallery')}
+                            className={`flex-1 py-1 rounded text-[10px] font-bold transition-all cursor-pointer border-none ${
+                              imageAssignments.poster === 'gallery' 
+                                ? 'bg-emerald-600 text-white shadow-sm' 
+                                : 'bg-gray-100 dark:bg-slate-800 text-gray-500 hover:bg-gray-200 dark:hover:bg-slate-700'
+                            }`}
+                          >
+                            گالری
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() => assignImageRole('poster', 'none')}
+                            className={`py-1 px-2 rounded text-[10px] font-bold transition-all cursor-pointer border-none ${
+                              imageAssignments.poster === 'none' 
+                                ? 'bg-gray-600 text-white' 
+                                : 'bg-gray-100 dark:bg-slate-800 text-gray-400 hover:bg-gray-200 dark:hover:bg-slate-700'
+                            }`}
+                          >
+                            ❌
+                          </button>
                         </div>
                       </div>
                     ) : (
@@ -3249,29 +3624,70 @@ export default function Movies({
 
                   {/* Backdrop Column */}
                   <div className="space-y-2 md:col-span-2">
-                    <span className="text-[11px] font-bold text-gray-500 block">تصویر پس‌زمینه (Backdrop):</span>
+                    <span className="text-[11px] font-bold text-gray-500 block">تصویر ۲ (Backdrop پیش‌فرض):</span>
                     {fetchedImages.backdrop ? (
-                      <div 
-                        onClick={() => setSelectedImagesToDownload(prev => ({ ...prev, backdrop: !prev.backdrop }))}
-                        className={`relative aspect-[16/9] rounded-xl overflow-hidden border-2 cursor-pointer transition-all group ${
-                          selectedImagesToDownload.backdrop 
-                            ? 'border-indigo-600 ring-2 ring-indigo-600/30 shadow-lg' 
-                            : 'border-gray-200 dark:border-gray-800 opacity-60 hover:opacity-100'
-                        }`}
-                      >
-                        <img 
-                          src={fetchedImages.backdrop} 
-                          alt="Backdrop" 
-                          className="w-full h-full object-cover"
-                          referrerPolicy="no-referrer"
-                        />
-                        <div className={`absolute inset-0 bg-black/40 transition-all flex items-center justify-center ${selectedImagesToDownload.backdrop ? 'opacity-100' : 'opacity-0 group-hover:opacity-100'}`}>
-                          <div className={`w-10 h-10 rounded-full flex items-center justify-center text-white ${selectedImagesToDownload.backdrop ? 'bg-indigo-600' : 'bg-gray-600'}`}>
-                            <Check className="w-5 h-5" />
+                      <div className="space-y-2 bg-white dark:bg-slate-900 p-2.5 rounded-xl border border-gray-150 dark:border-slate-800">
+                        <div 
+                          className={`relative aspect-[16/9] rounded-lg overflow-hidden border-2 transition-all ${
+                            imageAssignments.backdrop === 'poster' ? 'border-indigo-600 shadow-md' :
+                            imageAssignments.backdrop === 'gallery' ? 'border-emerald-600 shadow-md' :
+                            'border-gray-200 dark:border-gray-800 opacity-45'
+                          }`}
+                        >
+                          <img 
+                            src={fetchedImages.backdrop} 
+                            alt="Backdrop" 
+                            className="w-full h-full object-cover"
+                            referrerPolicy="no-referrer"
+                          />
+                          {imageAssignments.backdrop === 'poster' && (
+                            <span className="absolute top-2 right-2 bg-indigo-600 text-white text-[9px] font-bold px-2 py-0.5 rounded-full shadow-md z-10">🖼️ پوستر اصلی</span>
+                          )}
+                          {imageAssignments.backdrop === 'gallery' && (
+                            <span className="absolute top-2 right-2 bg-emerald-600 text-white text-[9px] font-bold px-2 py-0.5 rounded-full shadow-md z-10">📷 گالری تصاویر</span>
+                          )}
+                          {imageAssignments.backdrop === 'none' && (
+                            <span className="absolute top-2 right-2 bg-gray-500 text-white text-[9px] font-bold px-2 py-0.5 rounded-full shadow-md z-10">❌ عدم انتخاب</span>
+                          )}
+                          <div className="absolute bottom-2 left-2 right-2 bg-black/60 backdrop-blur-sm rounded px-2 py-0.5 text-center">
+                            <span className="text-[8px] font-bold text-white font-mono">backdrop.jpg</span>
                           </div>
                         </div>
-                        <div className="absolute bottom-2 left-2 right-2 bg-black/60 backdrop-blur-sm rounded-lg px-2 py-1 text-center">
-                          <span className="text-[9px] font-bold text-white">نام فایل: backdrop.jpg</span>
+                        {/* Selector Buttons */}
+                        <div className="flex gap-1 justify-center">
+                          <button
+                            type="button"
+                            onClick={() => assignImageRole('backdrop', 'poster')}
+                            className={`flex-1 py-1 rounded text-[10px] font-bold transition-all cursor-pointer border-none ${
+                              imageAssignments.backdrop === 'poster' 
+                                ? 'bg-indigo-600 text-white shadow-sm' 
+                                : 'bg-gray-100 dark:bg-slate-800 text-gray-500 hover:bg-gray-200 dark:hover:bg-slate-700'
+                            }`}
+                          >
+                            پوستر اصلی
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() => assignImageRole('backdrop', 'gallery')}
+                            className={`flex-1 py-1 rounded text-[10px] font-bold transition-all cursor-pointer border-none ${
+                              imageAssignments.backdrop === 'gallery' 
+                                ? 'bg-emerald-600 text-white shadow-sm' 
+                                : 'bg-gray-100 dark:bg-slate-800 text-gray-500 hover:bg-gray-200 dark:hover:bg-slate-700'
+                            }`}
+                          >
+                            گالری
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() => assignImageRole('backdrop', 'none')}
+                            className={`py-1 px-2 rounded text-[10px] font-bold transition-all cursor-pointer border-none ${
+                              imageAssignments.backdrop === 'none' 
+                                ? 'bg-gray-600 text-white' 
+                                : 'bg-gray-100 dark:bg-slate-800 text-gray-400 hover:bg-gray-200 dark:hover:bg-slate-700'
+                            }`}
+                          >
+                            ❌
+                          </button>
                         </div>
                       </div>
                     ) : (
@@ -3287,38 +3703,75 @@ export default function Movies({
                   <div className="space-y-2 pt-2">
                     <span className="text-[11px] font-bold text-gray-500 block">سایر تصاویر گالری فیلم (Scenes):</span>
                     <div className="grid grid-cols-2 sm:grid-cols-3 gap-3">
-                      {fetchedImages.gallery.map((url, idx) => (
-                        <div 
-                          key={idx}
-                          onClick={() => {
-                            setSelectedImagesToDownload(prev => {
-                              const newGal = [...prev.gallery];
-                              newGal[idx] = !newGal[idx];
-                              return { ...prev, gallery: newGal };
-                            });
-                          }}
-                          className={`relative aspect-[16/9] rounded-xl overflow-hidden border-2 cursor-pointer transition-all group ${
-                            selectedImagesToDownload.gallery[idx] 
-                              ? 'border-indigo-600 ring-2 ring-indigo-600/30 shadow-lg' 
-                              : 'border-gray-200 dark:border-gray-800 opacity-60 hover:opacity-100'
-                          }`}
-                        >
-                          <img 
-                            src={url} 
-                            alt={`Gallery scene ${idx + 1}`} 
-                            className="w-full h-full object-cover"
-                            referrerPolicy="no-referrer"
-                          />
-                          <div className={`absolute inset-0 bg-black/40 transition-all flex items-center justify-center ${selectedImagesToDownload.gallery[idx] ? 'opacity-100' : 'opacity-0 group-hover:opacity-100'}`}>
-                            <div className={`w-8 h-8 rounded-full flex items-center justify-center text-white ${selectedImagesToDownload.gallery[idx] ? 'bg-indigo-600' : 'bg-gray-600'}`}>
-                              <Check className="w-4 h-4" />
+                      {fetchedImages.gallery.map((url, idx) => {
+                        const currentRole = imageAssignments.gallery[idx];
+                        return (
+                          <div key={idx} className="space-y-2 bg-white dark:bg-slate-900 p-2 rounded-xl border border-gray-150 dark:border-slate-800">
+                            <div 
+                              className={`relative aspect-[16/9] rounded-lg overflow-hidden border-2 transition-all ${
+                                currentRole === 'poster' ? 'border-indigo-600 shadow-md' :
+                                currentRole === 'gallery' ? 'border-emerald-600 shadow-md' :
+                                'border-gray-200 dark:border-gray-800 opacity-45'
+                              }`}
+                            >
+                              <img 
+                                src={url} 
+                                alt={`Gallery scene ${idx + 1}`} 
+                                className="w-full h-full object-cover"
+                                referrerPolicy="no-referrer"
+                              />
+                              {currentRole === 'poster' && (
+                                <span className="absolute top-2 right-2 bg-indigo-600 text-white text-[9px] font-bold px-1.5 py-0.5 rounded-full shadow-md z-10">🖼️ پوستر اصلی</span>
+                              )}
+                              {currentRole === 'gallery' && (
+                                <span className="absolute top-2 right-2 bg-emerald-600 text-white text-[9px] font-bold px-1.5 py-0.5 rounded-full shadow-md z-10">📷 گالری تصاویر</span>
+                              )}
+                              {currentRole === 'none' && (
+                                <span className="absolute top-2 right-2 bg-gray-500 text-white text-[9px] font-bold px-1.5 py-0.5 rounded-full shadow-md z-10">❌ عدم انتخاب</span>
+                              )}
+                              <div className="absolute bottom-1.5 left-1.5 right-1.5 bg-black/60 backdrop-blur-sm rounded px-1.5 py-0.5 text-center">
+                                <span className="text-[7px] font-bold text-white font-mono">gallery_{idx + 1}.jpg</span>
+                              </div>
+                            </div>
+                            {/* Selector Buttons */}
+                            <div className="flex gap-1 justify-center">
+                              <button
+                                type="button"
+                                onClick={() => assignImageRole(idx, 'poster')}
+                                className={`flex-1 py-0.5 rounded text-[9px] font-bold transition-all cursor-pointer border-none ${
+                                  currentRole === 'poster' 
+                                    ? 'bg-indigo-600 text-white shadow-sm' 
+                                    : 'bg-gray-100 dark:bg-slate-800 text-gray-500 hover:bg-gray-200'
+                                }`}
+                              >
+                                پوستر
+                              </button>
+                              <button
+                                type="button"
+                                onClick={() => assignImageRole(idx, 'gallery')}
+                                className={`flex-1 py-0.5 rounded text-[9px] font-bold transition-all cursor-pointer border-none ${
+                                  currentRole === 'gallery' 
+                                    ? 'bg-emerald-600 text-white shadow-sm' 
+                                    : 'bg-gray-100 dark:bg-slate-800 text-gray-500 hover:bg-gray-200'
+                                }`}
+                              >
+                                گالری
+                              </button>
+                              <button
+                                type="button"
+                                onClick={() => assignImageRole(idx, 'none')}
+                                className={`py-0.5 px-1.5 rounded text-[9px] font-bold transition-all cursor-pointer border-none ${
+                                  currentRole === 'none' 
+                                    ? 'bg-gray-600 text-white shadow-sm' 
+                                    : 'bg-gray-100 dark:bg-slate-800 text-gray-400 hover:bg-gray-200'
+                                }`}
+                              >
+                                ❌
+                              </button>
                             </div>
                           </div>
-                          <div className="absolute bottom-1.5 left-1.5 right-1.5 bg-black/60 backdrop-blur-sm rounded px-1.5 py-0.5 text-center">
-                            <span className="text-[8px] font-bold text-white">gallery_{idx + 1}.jpg</span>
-                          </div>
-                        </div>
-                      ))}
+                        );
+                      })}
                     </div>
                   </div>
                 )}
@@ -3328,10 +3781,10 @@ export default function Movies({
             {/* Footer */}
             <div className="px-6 py-4 bg-gray-50 dark:bg-slate-950/40 border-t border-gray-150 dark:border-slate-800 flex items-center justify-between">
               <span className="text-[10px] text-gray-500">
-                کل تصاویر انتخابی: {[
-                  selectedImagesToDownload.poster, 
-                  selectedImagesToDownload.backdrop, 
-                  ...selectedImagesToDownload.gallery.filter(Boolean)
+                کل تصاویر انتخابی جهت دانلود: {[
+                  imageAssignments.poster !== 'none',
+                  imageAssignments.backdrop !== 'none',
+                  ...imageAssignments.gallery.map(g => g !== 'none')
                 ].filter(Boolean).length} عدد
               </span>
 

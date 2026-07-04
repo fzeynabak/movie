@@ -57,72 +57,17 @@ export class MediaScanner {
     const rawFiles = await this.scanDirectory(directoryPath);
     const results: ScannedMediaItem[] = [];
 
-    // Parallel processing with controlled batch size or simple loop for reliable API rate limit handling
     for (const file of rawFiles) {
       try {
         const parsed = FilenameParser.parse(file.filename);
-        let tmdb: TMDbMetadata | null = null;
-        let matchStatus: 'matched' | 'unknown' | 'failed' = 'unknown';
-
-        // Extract parent folder's name to use as primary Persian search query
-        const parts = file.folder.split(/[/\\]/);
-        const parentFolderName = parts[parts.length - 1] || '';
-
-        try {
-          tmdb = await TMDbService.findBestMatch(parsed, parentFolderName);
-          if (tmdb) {
-            matchStatus = 'matched';
-
-            // Download posters and backdrop locally inside film directory under /pic/
-            if (window.electronAPI && window.electronAPI.savePosterLocal) {
-              const isWindows = file.folder.includes('\\');
-              const picFolder = file.folder + (isWindows ? '\\pic' : '/pic');
-
-              // A. Save poster
-              if (tmdb.posterPath) {
-                const posterRes = await window.electronAPI.savePosterLocal(tmdb.posterPath, picFolder, 'poster');
-                if (posterRes && posterRes.success) {
-                  tmdb.posterPath = posterRes.savedPath;
-                }
-              }
-
-              // B. Save backdrop
-              if (tmdb.backdropPath) {
-                const backdropRes = await window.electronAPI.savePosterLocal(tmdb.backdropPath, picFolder, 'backdrop');
-                if (backdropRes && backdropRes.success) {
-                  tmdb.backdropPath = backdropRes.savedPath;
-                }
-              }
-
-              // C. Save gallery (scenes)
-              if (tmdb.gallery && tmdb.gallery.length > 0) {
-                const localGallery: string[] = [];
-                for (let i = 0; i < Math.min(tmdb.gallery.length, 3); i++) {
-                  const imgUrl = tmdb.gallery[i];
-                  const gallRes = await window.electronAPI.savePosterLocal(imgUrl, picFolder, `gallery_${i + 1}`);
-                  if (gallRes && gallRes.success) {
-                    localGallery.push(gallRes.savedPath);
-                  }
-                }
-                tmdb.gallery = localGallery;
-              }
-            }
-          } else {
-            matchStatus = 'unknown';
-          }
-        } catch (err) {
-          console.error(`TMDb Service failed during scan for "${file.filename}":`, err);
-          matchStatus = 'failed';
-        }
-
         results.push({
           file,
           parsed,
-          tmdb,
-          matchStatus
+          tmdb: null,
+          matchStatus: 'unknown'
         });
       } catch (err) {
-        console.error(`Error scanning and matching file "${file.filename}":`, err);
+        console.error(`Error scanning and parsing file "${file.filename}":`, err);
       }
     }
 

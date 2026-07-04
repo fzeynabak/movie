@@ -39,7 +39,9 @@ import {
   Download,
   Globe,
   Maximize2,
-  Network
+  Network,
+  Grid,
+  List
 } from 'lucide-react';
 
 interface SeriesProps {
@@ -91,6 +93,17 @@ export default function SeriesPage({
   const [scannedFiles, setScannedFiles] = useState<ScannedMediaItem[]>([]);
   const [showScanPreviewModal, setShowScanPreviewModal] = useState(false);
 
+  // Advanced List and Card View Toggle State
+  const [viewMode, setViewMode] = useState<'card' | 'list'>('card');
+  const [colFilters, setColFilters] = useState<Record<string, string>>({
+    titleFa: '',
+    titleEn: '',
+    quality: '',
+    imdbRating: '',
+    year: '',
+    category: ''
+  });
+
   // Form Fields State
   const [formCategory, setFormCategory] = useState<MediaCategory>('ایرانی');
   const [formTitleFa, setFormTitleFa] = useState('');
@@ -136,11 +149,28 @@ export default function SeriesPage({
     backdrop: string;
     gallery: string[];
   }>({ poster: '', backdrop: '', gallery: [] });
-  const [selectedImagesToDownload, setSelectedImagesToDownload] = useState<{
-    poster: boolean;
-    backdrop: boolean;
-    gallery: boolean[];
-  }>({ poster: true, backdrop: true, gallery: [] });
+  const [imageAssignments, setImageAssignments] = useState<{
+    poster: 'poster' | 'gallery' | 'none';
+    backdrop: 'poster' | 'gallery' | 'none';
+    gallery: ('poster' | 'gallery' | 'none')[];
+  }>({
+    poster: 'poster',
+    backdrop: 'gallery',
+    gallery: []
+  });
+
+  const assignImageRole = (indexOrKey: 'poster' | 'backdrop' | number, role: 'poster' | 'gallery' | 'none') => {
+    setImageAssignments(prev => {
+      if (typeof indexOrKey === 'number') {
+        const newGallery = [...prev.gallery];
+        newGallery[indexOrKey] = role;
+        return { ...prev, gallery: newGallery };
+      } else {
+        return { ...prev, [indexOrKey]: role };
+      }
+    });
+  };
+
   const [downloadDestFolder, setDownloadDestFolder] = useState('');
   const [isDownloadingImages, setIsDownloadingImages] = useState(false);
 
@@ -182,62 +212,94 @@ export default function SeriesPage({
         const picFolder = downloadDestFolder.trim() + (isWindows ? '\\pic' : '/pic');
         
         let posterLocalPath = '';
-        if (selectedImagesToDownload.poster && fetchedImages.poster) {
+        const galleryPaths: string[] = [];
+        
+        // 1. Process default poster
+        if (imageAssignments.poster === 'poster' && fetchedImages.poster) {
           const res = await window.electronAPI.savePosterLocal(fetchedImages.poster, picFolder, 'poster');
           if (res && res.success) {
             posterLocalPath = res.savedPath;
-            setFormPoster(res.savedPath);
-          } else {
-            console.error('Failed to download poster:', res?.error);
+          }
+        } else if (imageAssignments.poster === 'gallery' && fetchedImages.poster) {
+          const res = await window.electronAPI.savePosterLocal(fetchedImages.poster, picFolder, 'gallery_poster');
+          if (res && res.success) {
+            galleryPaths.push(res.savedPath);
           }
         }
         
-        let backdropLocalPath = '';
-        if (selectedImagesToDownload.backdrop && fetchedImages.backdrop) {
+        // 2. Process default backdrop
+        if (imageAssignments.backdrop === 'poster' && fetchedImages.backdrop) {
+          const res = await window.electronAPI.savePosterLocal(fetchedImages.backdrop, picFolder, 'poster_backdrop');
+          if (res && res.success) {
+            posterLocalPath = res.savedPath;
+          }
+        } else if (imageAssignments.backdrop === 'gallery' && fetchedImages.backdrop) {
           const res = await window.electronAPI.savePosterLocal(fetchedImages.backdrop, picFolder, 'backdrop');
           if (res && res.success) {
-            backdropLocalPath = res.savedPath;
-          } else {
-            console.error('Failed to download backdrop:', res?.error);
+            galleryPaths.push(res.savedPath);
           }
         }
-
-        const localGallery: string[] = [];
-        if (backdropLocalPath) {
-          localGallery.push(backdropLocalPath);
-        }
         
+        // 3. Process extra gallery images
         for (let i = 0; i < fetchedImages.gallery.length; i++) {
-          if (selectedImagesToDownload.gallery[i]) {
+          const role = imageAssignments.gallery[i];
+          if (role === 'poster') {
+            const imgUrl = fetchedImages.gallery[i];
+            const res = await window.electronAPI.savePosterLocal(imgUrl, picFolder, `poster_extra_${i + 1}`);
+            if (res && res.success) {
+              posterLocalPath = res.savedPath;
+            }
+          } else if (role === 'gallery') {
             const imgUrl = fetchedImages.gallery[i];
             const res = await window.electronAPI.savePosterLocal(imgUrl, picFolder, `gallery_${i + 1}`);
             if (res && res.success) {
-              localGallery.push(res.savedPath);
+              galleryPaths.push(res.savedPath);
             }
           }
         }
-
-        if (localGallery.length > 0) {
-          setFormGallery(localGallery.join(','));
+        
+        if (posterLocalPath) {
+          setFormPoster(posterLocalPath);
+        }
+        if (galleryPaths.length > 0) {
+          setFormGallery(galleryPaths.join(','));
         }
         
-        showToast('تمام تصاویر انتخابی با موفقیت ذخیره و به فرم متصل شدند.');
+        showToast('تمام تصاویر انتخابی با موفقیت در پوشه سریال ذخیره و به فیلدها متصل شدند.');
         setShowImagePickerModal(false);
       } else {
-        // Fallback for online preview
-        if (selectedImagesToDownload.poster) {
-          setFormPoster(fetchedImages.poster);
+        // Fallback for online preview / web simulation
+        let posterWebUrl = '';
+        const galleryWebUrls: string[] = [];
+        
+        if (imageAssignments.poster === 'poster') {
+          posterWebUrl = fetchedImages.poster;
+        } else if (imageAssignments.poster === 'gallery') {
+          galleryWebUrls.push(fetchedImages.poster);
         }
-        const galleryUrls: string[] = [];
-        if (selectedImagesToDownload.backdrop && fetchedImages.backdrop) {
-          galleryUrls.push(fetchedImages.backdrop);
+        
+        if (imageAssignments.backdrop === 'poster') {
+          posterWebUrl = fetchedImages.backdrop;
+        } else if (imageAssignments.backdrop === 'gallery') {
+          galleryWebUrls.push(fetchedImages.backdrop);
         }
+        
         fetchedImages.gallery.forEach((url, idx) => {
-          if (selectedImagesToDownload.gallery[idx]) {
-            galleryUrls.push(url);
+          const role = imageAssignments.gallery[idx];
+          if (role === 'poster') {
+            posterWebUrl = url;
+          } else if (role === 'gallery') {
+            galleryWebUrls.push(url);
           }
         });
-        setFormGallery(galleryUrls.join(','));
+        
+        if (posterWebUrl) {
+          setFormPoster(posterWebUrl);
+        }
+        if (galleryWebUrls.length > 0) {
+          setFormGallery(galleryWebUrls.join(','));
+        }
+        
         showToast('تصاویر انتخابی (آدرس‌های اینترنتی) به فیلدهای مربوطه متصل شدند.');
         setShowImagePickerModal(false);
       }
@@ -379,10 +441,10 @@ export default function SeriesPage({
       backdrop: metadata.backdropPath || '',
       gallery: galleryImages
     });
-    setSelectedImagesToDownload({
-      poster: !!metadata.posterPath,
-      backdrop: !!metadata.backdropPath,
-      gallery: galleryImages.map(() => true)
+    setImageAssignments({
+      poster: metadata.posterPath ? 'poster' : 'none',
+      backdrop: metadata.backdropPath ? 'gallery' : 'none',
+      gallery: galleryImages.map(() => 'gallery')
     });
 
     showToast('مشخصات متنی سریال دریافت شد. لطفاً تصاویر مورد نیاز را تایید و ذخیره کنید.');
@@ -1440,6 +1502,118 @@ export default function SeriesPage({
     }
   };
 
+  const handleAutoRenameEpisodeFiles = async () => {
+    if (!managingSeries) return;
+    if (!activeSeasonId) {
+      showAlert('لطفا ابتدا یک فصل را انتخاب کنید تا قسمت‌های آن تغییر نام یابند.', 'warning', 'فصل انتخاب نشده است');
+      return;
+    }
+    const currentSeason = managingSeries.seasons.find(s => s.id === activeSeasonId);
+    if (!currentSeason || !currentSeason.episodes || currentSeason.episodes.length === 0) {
+      showAlert('این فصل دارای هیچ قسمتی نیست.', 'warning', 'قسمتی یافت نشد');
+      return;
+    }
+
+    if (!window.confirm('آیا مطمئن هستید که می‌خواهید نام فیزیکی فایل‌های این فصل را بر اساس یک نقشه راه منظم و استاندارد (مثلاً Aban-S01E01.mp4) تغییر دهید؟ این عملیات فایل‌های فیزیکی روی دیسک را تغییر نام خواهد داد.')) {
+      return;
+    }
+
+    try {
+      showToast('در حال تغییر نام فیزیکی فایل‌ها...', 'info');
+      let successRenames = 0;
+      let failedRenames = 0;
+
+      // Clean the series title for use in English filename
+      const rawTitle = managingSeries.titleEn || managingSeries.titleFa || 'Series';
+      const cleanTitle = rawTitle
+        .trim()
+        .replace(/[^a-zA-Z0-9\s-_]/g, '') // remove special characters
+        .replace(/\s+/g, '-'); // replace spaces with hyphens
+
+      const seasonNum = currentSeason.seasonNumber || 1;
+      const sStr = seasonNum.toString().padStart(2, '0');
+
+      // Create a cloned version of seasons list
+      const updatedSeasonsList = JSON.parse(JSON.stringify(managingSeries.seasons || [])) as Season[];
+      const seasonToUpdate = updatedSeasonsList.find(s => s.id === activeSeasonId);
+      if (!seasonToUpdate) return;
+
+      for (const ep of seasonToUpdate.episodes || []) {
+        const oldPath = ep.videoPath;
+        if (!oldPath) continue;
+
+        // Check if file actually exists
+        const check = window.electronAPI && window.electronAPI.existsFile ? await window.electronAPI.existsFile(oldPath) : null;
+        if (!check || !check.exists) {
+          continue; // skip files that don't exist physically
+        }
+
+        // Get extension
+        const extIdx = oldPath.lastIndexOf('.');
+        const ext = extIdx !== -1 ? oldPath.substring(extIdx).toLowerCase() : '.mkv';
+
+        // Extract folder path (directory including trailing slash)
+        const lastSlash = Math.max(oldPath.lastIndexOf('\\'), oldPath.lastIndexOf('/'));
+        const folder = oldPath.substring(0, lastSlash + 1);
+        const originalFileName = oldPath.substring(lastSlash + 1);
+
+        // Try to extract quality from original name (e.g., 1080, 720, 480)
+        let qualitySuffix = '';
+        const qualMatch = originalFileName.match(/(1080|720|480)/);
+        if (qualMatch) {
+          qualitySuffix = `-${qualMatch[1]}`;
+        } else if (managingSeries.quality) {
+          const sQualMatch = managingSeries.quality.match(/(1080|720|480)/);
+          if (sQualMatch) {
+            qualitySuffix = `-${sQualMatch[1]}`;
+          }
+        }
+
+        const eStr = (ep.episodeNumber || 1).toString().padStart(2, '0');
+        
+        // Target name, e.g. Aban-S01E01-720.mp4
+        const newFileName = `${cleanTitle}-S${sStr}E${eStr}${qualitySuffix}${ext}`;
+        const newPath = folder + newFileName;
+
+        if (oldPath.toLowerCase() !== newPath.toLowerCase()) {
+          if (window.electronAPI && window.electronAPI.renameFile) {
+            const renameRes = await window.electronAPI.renameFile(oldPath, newPath);
+            if (renameRes && renameRes.success) {
+              ep.videoPath = newPath;
+              successRenames++;
+            } else {
+              failedRenames++;
+              console.error(`Failed to rename physical file from ${oldPath} to ${newPath}:`, renameRes?.error);
+            }
+          }
+        } else if (oldPath !== newPath) {
+          // Case-only rename or direct path match
+          if (window.electronAPI && window.electronAPI.renameFile) {
+            const renameRes = await window.electronAPI.renameFile(oldPath, newPath);
+            if (renameRes && renameRes.success) {
+              ep.videoPath = newPath;
+              successRenames++;
+            }
+          }
+        }
+      }
+
+      if (successRenames > 0) {
+        // Save database & refresh state
+        dbService.updateSeries(managingSeries.id, { seasons: updatedSeasonsList });
+        const updated = dbService.getSeries().find(s => s.id === managingSeries.id);
+        if (updated) setManagingSeries(updated);
+        refreshData();
+        showToast(`با موفقیت تعداد ${successRenames} فایل تغییر نام داده شد!`, 'success');
+      } else {
+        showToast('هیچ فایلی واجد شرایط تغییر نام یافت نشد یا تمام فایل‌ها از قبل نام استاندارد داشتند.', 'warning');
+      }
+    } catch (err: any) {
+      console.error('Error auto renaming files:', err);
+      showToast('بروز خطا در هنگام تغییر نام فایل‌ها: ' + err.message, 'error');
+    }
+  };
+
   const handleDeleteEpisode = (seasonId: string, epId: string) => {
     if (!managingSeries) return;
     if (window.confirm('آیا قصد حذف این قسمت را دارید؟')) {
@@ -1631,7 +1805,8 @@ export default function SeriesPage({
 
   // Filter List Logic
   const filteredSeries = seriesList.filter(item => {
-    const matchesCategory = selectedCategory === 'همه' || item.category === selectedCategory;
+    const seriesCats = item.category ? item.category.split(',').map(c => c.trim()) : [];
+    const matchesCategory = selectedCategory === 'همه' || seriesCats.includes(selectedCategory);
     const matchesSearch = 
       item.titleFa.toLowerCase().includes(searchQuery.toLowerCase()) ||
       item.titleEn.toLowerCase().includes(searchQuery.toLowerCase()) ||
@@ -1653,7 +1828,16 @@ export default function SeriesPage({
       item.actors.toLowerCase().includes(filterCrew.toLowerCase()) ||
       (item.writer && item.writer.toLowerCase().includes(filterCrew.toLowerCase()));
 
-    return matchesCategory && matchesSearch && matchesCountry && matchesLanguage && matchesGenre && matchesYear && matchesQuality && matchesMinImdb && matchesCrew;
+    // Advanced Column-Header Filters
+    const matchesColTitleFa = !colFilters.titleFa || item.titleFa.toLowerCase().includes(colFilters.titleFa.toLowerCase());
+    const matchesColTitleEn = !colFilters.titleEn || item.titleEn.toLowerCase().includes(colFilters.titleEn.toLowerCase());
+    const matchesColQuality = !colFilters.quality || (item.quality || '').toLowerCase().includes(colFilters.quality.toLowerCase());
+    const matchesColImdb = !colFilters.imdbRating || item.imdbRating.toLowerCase().includes(colFilters.imdbRating.toLowerCase());
+    const matchesColYear = !colFilters.year || item.year.toLowerCase().includes(colFilters.year.toLowerCase());
+    const matchesColCategory = !colFilters.category || (item.category || '').toLowerCase().includes(colFilters.category.toLowerCase());
+
+    return matchesCategory && matchesSearch && matchesCountry && matchesLanguage && matchesGenre && matchesYear && matchesQuality && matchesMinImdb && matchesCrew &&
+      matchesColTitleFa && matchesColTitleEn && matchesColQuality && matchesColImdb && matchesColYear && matchesColCategory;
   });
 
   // Sort
@@ -1709,36 +1893,68 @@ export default function SeriesPage({
         </div>
       </div>
 
-      {/* Tabs Selector category */}
-      <div className="flex items-center overflow-x-auto gap-2 pb-1 scrollbar-none" id="series-category-selector">
-        <button
-          onClick={() => { setSelectedCategory('همه'); setCurrentPage(1); }}
-          className={`px-4 py-2 text-xs font-semibold rounded-lg shrink-0 transition-colors cursor-pointer ${
-            selectedCategory === 'همه' 
-              ? 'bg-gray-900 text-white dark:bg-white dark:text-gray-950' 
-              : 'bg-white text-gray-700 hover:bg-gray-50 border border-gray-150 dark:bg-[#1e293b] dark:text-gray-300 dark:border-gray-800 dark:hover:bg-slate-800'
-          }`}
-          id="series-cat-all"
-        >
-          همه سریال‌ها ({toPersianNums(seriesList.length)})
-        </button>
-        {CATEGORIES.map(cat => {
-          const count = seriesList.filter(s => s.category === cat).length;
-          return (
-            <button
-              key={cat}
-              onClick={() => { setSelectedCategory(cat); setCurrentPage(1); }}
-              className={`px-4 py-2 text-xs font-semibold rounded-lg shrink-0 transition-colors cursor-pointer ${
-                selectedCategory === cat 
-                  ? 'bg-sky-600 text-white' 
-                  : 'bg-white text-gray-700 hover:bg-gray-50 border border-gray-150 dark:bg-[#1e293b] dark:text-gray-300 dark:border-gray-800 dark:hover:bg-slate-800'
-              }`}
-              id={`series-cat-${cat}`}
-            >
-              {cat} ({toPersianNums(count)})
-            </button>
-          );
-        })}
+      {/* Categories Tabs Selector and View Switcher */}
+      <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3 border-b border-gray-150 dark:border-gray-800 pb-2" id="series-category-selector-wrapper">
+        <div className="flex items-center overflow-x-auto gap-2 pb-1 scrollbar-none" id="series-category-selector">
+          <button
+            onClick={() => { setSelectedCategory('همه'); setCurrentPage(1); }}
+            className={`px-4 py-2 text-xs font-semibold rounded-lg shrink-0 transition-colors cursor-pointer ${
+              selectedCategory === 'همه' 
+                ? 'bg-gray-900 text-white dark:bg-white dark:text-gray-950' 
+                : 'bg-white text-gray-700 hover:bg-gray-50 border border-gray-150 dark:bg-[#1e293b] dark:text-gray-300 dark:border-gray-800 dark:hover:bg-slate-800'
+            }`}
+            id="series-cat-all"
+          >
+            همه سریال‌ها ({toPersianNums(seriesList.length)})
+          </button>
+          {CATEGORIES.map(cat => {
+            const count = seriesList.filter(s => s.category && s.category.split(',').map(c => c.trim()).includes(cat)).length;
+            return (
+              <button
+                key={cat}
+                onClick={() => { setSelectedCategory(cat); setCurrentPage(1); }}
+                className={`px-4 py-2 text-xs font-semibold rounded-lg shrink-0 transition-colors cursor-pointer ${
+                  selectedCategory === cat 
+                    ? 'bg-sky-600 text-white' 
+                    : 'bg-white text-gray-700 hover:bg-gray-50 border border-gray-150 dark:bg-[#1e293b] dark:text-gray-300 dark:border-gray-800 dark:hover:bg-slate-800'
+                }`}
+                id={`series-cat-${cat}`}
+              >
+                {cat} ({toPersianNums(count)})
+              </button>
+            );
+          })}
+        </div>
+
+        {/* Beautiful Segmented Toggle for Card vs Advanced List View */}
+        <div className="flex items-center gap-1 bg-gray-100 dark:bg-slate-800 p-1 rounded-lg shrink-0 border border-gray-200 dark:border-slate-700/50 self-end sm:self-auto shadow-inner">
+          <button
+            type="button"
+            onClick={() => setViewMode('card')}
+            className={`flex items-center gap-1.5 px-3 py-1.5 rounded-md text-xs font-bold transition-all cursor-pointer ${
+              viewMode === 'card' 
+                ? 'bg-white dark:bg-slate-700 text-sky-600 dark:text-white shadow-sm' 
+                : 'text-gray-500 hover:text-gray-700 dark:text-gray-400 dark:hover:text-gray-200'
+            }`}
+            title="نمای کارتی"
+          >
+            <Grid className="w-3.5 h-3.5" />
+            <span>نمای کارتی</span>
+          </button>
+          <button
+            type="button"
+            onClick={() => setViewMode('list')}
+            className={`flex items-center gap-1.5 px-3 py-1.5 rounded-md text-xs font-bold transition-all cursor-pointer ${
+              viewMode === 'list' 
+                ? 'bg-white dark:bg-slate-700 text-sky-600 dark:text-white shadow-sm' 
+                : 'text-gray-500 hover:text-gray-700 dark:text-gray-400 dark:hover:text-gray-200'
+            }`}
+            title="نمای لیستی پیشرفته با فیلتر سرستون"
+          >
+            <List className="w-3.5 h-3.5" />
+            <span>نمای لیستی پیشرفته</span>
+          </button>
+        </div>
       </div>
 
       {/* Search and Sort Filter toolbar */}
@@ -1936,7 +2152,7 @@ export default function SeriesPage({
           <h3 className="text-sm font-bold text-gray-800 dark:text-gray-200">سریالی سازگار با کوئری شما وجود ندارد!</h3>
           <p className="text-xs text-gray-400 mt-1">امکان تعریف سریال با کلیک روی افزودن سریال جدید بالا سمت چپ برقرار است.</p>
         </div>
-      ) : (
+      ) : viewMode === 'card' ? (
         <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6" id="series-grid">
           {paginatedSeries.map(series => {
             const seasonsCount = series.seasons.length;
@@ -1964,22 +2180,24 @@ export default function SeriesPage({
                     <span className="absolute top-1 right-1 bg-black/60 text-amber-500 font-mono text-[9px] px-1 py-0.5 rounded font-bold">
                       ★ {toPersianNums(series.imdbRating)}
                     </span>
-                    {series.isEnded && (
-                      <div className="absolute inset-0 bg-red-950/70 backdrop-blur-[0.5px] flex items-center justify-center p-1 select-none pointer-events-none" id={`series-ended-badge-${series.id}`}>
-                        <div className="border-2 border-dashed border-red-300 rounded px-1.5 py-1 rotate-[-12deg] bg-red-600/90 text-[10px] font-black text-white text-center shadow-lg whitespace-nowrap animate-pulse">
-                          {series.isEndedText || 'پایان یافته'}
-                        </div>
-                      </div>
-                    )}
                   </div>
 
                   {/* Core metadata details */}
                   <div className="min-w-0 flex-1 flex flex-col justify-between">
                     <div>
                       <div className="flex items-center gap-1.5 flex-wrap">
-                        <span className="text-[9px] bg-slate-100 text-slate-700 dark:bg-slate-800 dark:text-slate-350 px-1.5 py-0.5 rounded font-bold truncate">
-                          {series.category}
-                        </span>
+                        <div className="flex flex-wrap gap-1">
+                          {series.isEnded && (
+                            <span className="text-[9px] bg-red-100 text-red-700 dark:bg-red-950/40 dark:text-red-400 px-1.5 py-0.5 rounded font-bold shrink-0 animate-pulse border border-red-200 dark:border-red-900/30">
+                              🎬 {series.isEndedText || 'پایان یافته'}
+                            </span>
+                          )}
+                          {(series.category || 'متفرقه').split(',').map(cat => (
+                            <span key={cat} className="text-[9px] bg-slate-100 text-slate-700 dark:bg-slate-800 dark:text-slate-350 px-1.5 py-0.5 rounded font-bold shrink-0">
+                              {cat.trim()}
+                            </span>
+                          ))}
+                        </div>
                         <span className="text-[9px] bg-sky-50 text-sky-600 dark:bg-sky-950/20 dark:text-sky-400 px-1.5 py-0.5 rounded font-bold truncate">
                           {series.quality}
                         </span>
@@ -2103,6 +2321,246 @@ export default function SeriesPage({
               </div>
             );
           })}
+        </div>
+      ) : (
+        <div className="overflow-x-auto bg-white dark:bg-[#1e293b] border border-gray-150 dark:border-slate-800 rounded-xl shadow-sm" id="series-list-table-container">
+          <table className="w-full text-right border-collapse text-xs" dir="rtl">
+            <thead>
+              <tr className="bg-gray-50 dark:bg-[#141d2e] border-b border-gray-200 dark:border-slate-800 text-gray-500 dark:text-gray-400 font-bold">
+                <th className="p-3 w-16 text-center">پوستر</th>
+                
+                <th className="p-3 min-w-[150px]">
+                  <div className="flex flex-col">
+                    <button 
+                      type="button"
+                      onClick={() => { setSortBy('titleFa'); setSortOrder(sortOrder === 'desc' ? 'asc' : 'desc'); }}
+                      className="flex items-center gap-1 font-bold text-gray-700 dark:text-gray-300 hover:text-[#38bdf8] transition-colors cursor-pointer"
+                    >
+                      <span>عنوان فارسی</span>
+                      {sortBy === 'titleFa' && (sortOrder === 'desc' ? '▼' : '▲')}
+                    </button>
+                    <input
+                      type="text"
+                      value={colFilters.titleFa}
+                      onChange={(e) => setColFilters(prev => ({ ...prev, titleFa: e.target.value }))}
+                      placeholder="فیلتر..."
+                      className="h-7 bg-white dark:bg-slate-850 border border-gray-200 dark:border-slate-700 rounded text-[10px] px-1.5 mt-1.5 focus:outline-none focus:ring-1 focus:ring-sky-500 font-normal w-full"
+                    />
+                  </div>
+                </th>
+
+                <th className="p-3 min-w-[150px]">
+                  <div className="flex flex-col">
+                    <button 
+                      type="button"
+                      onClick={() => { setSortBy('titleEn' as any); setSortOrder(sortOrder === 'desc' ? 'asc' : 'desc'); }}
+                      className="flex items-center gap-1 font-bold text-gray-700 dark:text-gray-300 hover:text-[#38bdf8] transition-colors cursor-pointer"
+                    >
+                      <span>عنوان انگلیسی</span>
+                      {sortBy === ('titleEn' as any) && (sortOrder === 'desc' ? '▼' : '▲')}
+                    </button>
+                    <input
+                      type="text"
+                      value={colFilters.titleEn}
+                      onChange={(e) => setColFilters(prev => ({ ...prev, titleEn: e.target.value }))}
+                      placeholder="فیلتر..."
+                      className="h-7 bg-white dark:bg-slate-850 border border-gray-200 dark:border-slate-700 rounded text-[10px] px-1.5 mt-1.5 focus:outline-none focus:ring-1 focus:ring-sky-500 font-normal w-full"
+                    />
+                  </div>
+                </th>
+
+                <th className="p-3 min-w-[100px]">
+                  <div className="flex flex-col">
+                    <button 
+                      type="button"
+                      onClick={() => { setSortBy('quality' as any); setSortOrder(sortOrder === 'desc' ? 'asc' : 'desc'); }}
+                      className="flex items-center gap-1 font-bold text-gray-700 dark:text-gray-300 hover:text-[#38bdf8] transition-colors cursor-pointer"
+                    >
+                      <span>کیفیت</span>
+                      {sortBy === ('quality' as any) && (sortOrder === 'desc' ? '▼' : '▲')}
+                    </button>
+                    <input
+                      type="text"
+                      value={colFilters.quality}
+                      onChange={(e) => setColFilters(prev => ({ ...prev, quality: e.target.value }))}
+                      placeholder="فیلتر..."
+                      className="h-7 bg-white dark:bg-slate-850 border border-gray-200 dark:border-slate-700 rounded text-[10px] px-1.5 mt-1.5 focus:outline-none focus:ring-1 focus:ring-sky-500 font-normal w-full"
+                    />
+                  </div>
+                </th>
+
+                <th className="p-3 min-w-[80px]">
+                  <div className="flex flex-col">
+                    <button 
+                      type="button"
+                      onClick={() => { setSortBy('imdbRating'); setSortOrder(sortOrder === 'desc' ? 'asc' : 'desc'); }}
+                      className="flex items-center gap-1 font-bold text-gray-700 dark:text-gray-300 hover:text-[#38bdf8] transition-colors cursor-pointer"
+                    >
+                      <span>امتیاز IMDb</span>
+                      {sortBy === 'imdbRating' && (sortOrder === 'desc' ? '▼' : '▲')}
+                    </button>
+                    <input
+                      type="text"
+                      value={colFilters.imdbRating}
+                      onChange={(e) => setColFilters(prev => ({ ...prev, imdbRating: e.target.value }))}
+                      placeholder="فیلتر..."
+                      className="h-7 bg-white dark:bg-slate-850 border border-gray-200 dark:border-slate-700 rounded text-[10px] px-1.5 mt-1.5 focus:outline-none focus:ring-1 focus:ring-sky-500 font-normal w-full"
+                    />
+                  </div>
+                </th>
+
+                <th className="p-3 min-w-[80px]">
+                  <div className="flex flex-col">
+                    <button 
+                      type="button"
+                      onClick={() => { setSortBy('year'); setSortOrder(sortOrder === 'desc' ? 'asc' : 'desc'); }}
+                      className="flex items-center gap-1 font-bold text-gray-700 dark:text-gray-300 hover:text-[#38bdf8] transition-colors cursor-pointer"
+                    >
+                      <span>سال ساخت</span>
+                      {sortBy === 'year' && (sortOrder === 'desc' ? '▼' : '▲')}
+                    </button>
+                    <input
+                      type="text"
+                      value={colFilters.year}
+                      onChange={(e) => setColFilters(prev => ({ ...prev, year: e.target.value }))}
+                      placeholder="فیلتر..."
+                      className="h-7 bg-white dark:bg-slate-850 border border-gray-200 dark:border-slate-700 rounded text-[10px] px-1.5 mt-1.5 focus:outline-none focus:ring-1 focus:ring-sky-500 font-normal w-full"
+                    />
+                  </div>
+                </th>
+
+                <th className="p-3 min-w-[100px]">
+                  <div className="flex flex-col">
+                    <span className="font-bold text-gray-700 dark:text-gray-300">دسته‌بندی</span>
+                    <input
+                      type="text"
+                      value={colFilters.category}
+                      onChange={(e) => setColFilters(prev => ({ ...prev, category: e.target.value }))}
+                      placeholder="فیلتر..."
+                      className="h-7 bg-white dark:bg-slate-850 border border-gray-200 dark:border-slate-700 rounded text-[10px] px-1.5 mt-1.5 focus:outline-none focus:ring-1 focus:ring-sky-500 font-normal w-full"
+                    />
+                  </div>
+                </th>
+
+                <th className="p-3 min-w-[120px] font-bold text-gray-700 dark:text-gray-300">آخرین قسمت</th>
+                <th className="p-3 min-w-[100px] font-bold text-gray-700 dark:text-gray-300 font-bold text-indigo-600 dark:text-indigo-400">آرشیو شما</th>
+                <th className="p-3 min-w-[110px] font-bold text-gray-700 dark:text-gray-300 font-bold text-emerald-600">قیمت پکیج</th>
+                <th className="p-3 min-w-[100px] font-bold text-gray-700 dark:text-gray-300 text-center">وضعیت اتمام</th>
+                <th className="p-3 w-[180px] text-center font-bold text-gray-700 dark:text-gray-300">عملیات</th>
+              </tr>
+            </thead>
+            <tbody>
+              {paginatedSeries.map((series) => {
+                const seasonsCount = series.seasons.length;
+                const episodesCount = series.seasons.reduce((sum, s) => sum + s.episodes.length, 0);
+                return (
+                  <tr 
+                    key={series.id} 
+                    onClick={() => setDetailSeries(series)}
+                    className="border-b border-gray-100 dark:border-slate-800/60 hover:bg-slate-50/55 dark:hover:bg-slate-800/40 cursor-pointer transition-colors"
+                  >
+                    <td className="p-2 text-center">
+                      <div className="w-10 h-14 rounded overflow-hidden mx-auto shadow-sm">
+                        <img 
+                          src={getSafePosterUrl(series.poster)} 
+                          alt="" 
+                          className="w-full h-full object-cover"
+                          referrerPolicy="no-referrer"
+                        />
+                      </div>
+                    </td>
+                    <td className="p-3 font-bold text-gray-900 dark:text-gray-100">{series.titleFa}</td>
+                    <td className="p-3 text-gray-500 font-mono text-[11px]">{series.titleEn}</td>
+                    <td className="p-3">
+                      <span className="bg-slate-100 dark:bg-slate-800 text-slate-700 dark:text-slate-300 text-[10px] px-2 py-0.5 rounded font-mono">
+                        {series.quality}
+                      </span>
+                    </td>
+                    <td className="p-3 text-amber-500 font-mono font-bold">★ {toPersianNums(series.imdbRating)}</td>
+                    <td className="p-3 font-mono text-gray-600 dark:text-gray-400">{toPersianNums(series.year)}</td>
+                    <td className="p-3">
+                      <div className="flex flex-wrap gap-1">
+                        {(series.category || 'متفرقه').split(',').map(cat => (
+                          <span key={cat} className="bg-indigo-50 dark:bg-indigo-950/30 text-indigo-600 dark:text-indigo-400 text-[9px] font-bold px-1.5 py-0.5 rounded">
+                            {cat.trim()}
+                          </span>
+                        ))}
+                      </div>
+                    </td>
+                    <td className="p-3 font-medium text-sky-600 dark:text-sky-400 truncate max-w-[150px]">
+                      {toPersianNums(getLatestEpisodeInfo(series))}
+                    </td>
+                    <td className="p-3 font-bold text-indigo-600 dark:text-indigo-400">
+                      {toPersianNums(series.myEpisodesCount || 0)} قسمت
+                    </td>
+                    <td className="p-3 text-emerald-600 font-bold font-mono">
+                      {formatCurrency(series.salePrice)}
+                    </td>
+                    <td className="p-3 text-center">
+                      {series.isEnded ? (
+                        <span className="bg-red-550 text-white text-[9px] font-extrabold px-1.5 py-0.5 rounded shadow">
+                          اتمام سریال
+                        </span>
+                      ) : (
+                        <span className="text-gray-400 italic text-[10px]">در حال پخش</span>
+                      )}
+                    </td>
+                    <td className="p-3" onClick={(e) => e.stopPropagation()}>
+                      <div className="flex items-center justify-center gap-1.5">
+                        <button
+                          onClick={(e) => handleOpenSale(series, e)}
+                          className="p-1.5 bg-emerald-500 hover:bg-emerald-600 text-white rounded transition-colors"
+                          title="ثبت فروش"
+                        >
+                          <DollarSign className="w-3.5 h-3.5" />
+                        </button>
+                        <button
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            setManagingSeries(series);
+                            if (series.seasons && series.seasons.length > 0) {
+                              setActiveSeasonId(series.seasons[0].id);
+                            } else {
+                              setActiveSeasonId(null);
+                            }
+                          }}
+                          className="p-1.5 bg-indigo-500 hover:bg-indigo-600 text-white rounded transition-colors"
+                          title="مدیریت قسمت‌ها و فصول"
+                        >
+                          <ListOrdered className="w-3.5 h-3.5" />
+                        </button>
+                        {series.officialSite && (
+                          <a
+                            href={series.officialSite}
+                            target="_blank"
+                            rel="noreferrer noopener"
+                            className="p-1.5 bg-amber-500 hover:bg-amber-600 text-white rounded transition-colors flex items-center justify-center"
+                            title="سایت مرجع"
+                          >
+                            <ExternalLink className="w-3.5 h-3.5" />
+                          </a>
+                        )}
+                        <button
+                          onClick={(e) => handleOpenEdit(series, e)}
+                          className="p-1.5 bg-sky-500 hover:bg-sky-600 text-white rounded transition-colors"
+                          title="ویرایش"
+                        >
+                          <Edit className="w-3.5 h-3.5" />
+                        </button>
+                        <button
+                          onClick={(e) => handleDeleteSeries(series.id, e)}
+                          className="p-1.5 bg-red-500 hover:bg-red-600 text-white rounded transition-colors"
+                          title="حذف"
+                        >
+                          <Trash2 className="w-3.5 h-3.5" />
+                        </button>
+                      </div>
+                    </td>
+                  </tr>
+                );
+              })}
+            </tbody>
+          </table>
         </div>
       )}
 
@@ -2323,16 +2781,34 @@ export default function SeriesPage({
                   />
                 </div>
 
-                {/* Category */}
-                <div className="space-y-1">
-                  <label className="text-[10px] font-bold text-gray-400 block">دسته اصلی سریال *</label>
-                  <select
-                    value={formCategory}
-                    onChange={(e) => setFormCategory(e.target.value as MediaCategory)}
-                    className="w-full h-9 px-2 bg-gray-50 dark:bg-slate-800 rounded-lg text-xs border border-gray-200 dark:border-gray-700 text-gray-800 dark:text-gray-200 focus:outline-none cursor-pointer"
-                  >
-                    {CATEGORIES.map(c => <option key={c} value={c}>{c}</option>)}
-                  </select>
+                 {/* Category */}
+                <div className="space-y-1.5 bg-gray-50/50 dark:bg-slate-800/40 p-2.5 rounded-xl border border-gray-150 dark:border-slate-800 md:col-span-1">
+                  <label className="text-[10px] font-black text-gray-400 block mb-1">دسته‌بندی‌های سریال * (امکان انتخاب همزمان چند دسته)</label>
+                  <div className="grid grid-cols-2 gap-2">
+                    {CATEGORIES.map(c => {
+                      const currentCats = formCategory ? formCategory.split(',').map(x => x.trim()) : [];
+                      const isChecked = currentCats.includes(c);
+                      return (
+                        <label key={c} className="flex items-center gap-1.5 px-2 py-1.5 bg-white dark:bg-slate-900 border border-gray-200 dark:border-gray-750 rounded-lg cursor-pointer hover:border-sky-500 hover:bg-sky-50/10 transition-colors select-none text-[10.5px] font-bold text-gray-700 dark:text-gray-200">
+                          <input
+                            type="checkbox"
+                            checked={isChecked}
+                            onChange={(e) => {
+                              let updatedCats;
+                              if (e.target.checked) {
+                                updatedCats = [...currentCats.filter(x => x !== c), c];
+                              } else {
+                                updatedCats = currentCats.filter(x => x !== c);
+                              }
+                              setFormCategory(updatedCats.join(', '));
+                            }}
+                            className="w-3.5 h-3.5 text-sky-600 rounded border-gray-300 dark:border-gray-700 focus:ring-sky-500 cursor-pointer"
+                          />
+                          <span>{c}</span>
+                        </label>
+                      );
+                    })}
+                  </div>
                 </div>
 
                 {/* Release year */}
@@ -2552,7 +3028,11 @@ export default function SeriesPage({
                         window.electronAPI.selectDirectory().then((dir) => {
                           if (dir) {
                             setFormFilePath(dir);
-                            triggerAutoTmdbSearchFromFolder(dir);
+                            if (!formTitleFa.trim() && !formTitleEn.trim()) {
+                              triggerAutoTmdbSearchFromFolder(dir);
+                            } else {
+                              showToast('مسیر پوشه ثبت شد بدون تغییر اطلاعات از قبل دریافت شده سریال.', 'info');
+                            }
                           }
                         }).catch(err => console.error(err));
                       } else {
@@ -2799,7 +3279,11 @@ export default function SeriesPage({
             <div className="p-5 flex-1 flex flex-col justify-between" id="series-detail-meta-column">
               <div className="space-y-3.5 text-right font-sans">
                 <div>
-                  <span className="text-[9px] bg-indigo-100 text-indigo-700 px-2 py-0.5 rounded font-bold dark:bg-indigo-950 dark:text-indigo-300">{detailSeries.category}</span>
+                <div className="flex flex-wrap gap-1">
+                  {(detailSeries.category || 'متفرقه').split(',').map(cat => (
+                    <span key={cat} className="text-[9px] bg-indigo-100 text-indigo-700 px-2 py-0.5 rounded font-bold dark:bg-indigo-950 dark:text-indigo-300 shrink-0">{cat.trim()}</span>
+                  ))}
+                </div>
                   <h2 className="text-base font-bold text-gray-900 dark:text-gray-100 mt-2">{detailSeries.titleFa}</h2>
                   <p className="text-xs text-gray-400 font-mono mt-0.5" dir="ltr">{detailSeries.titleEn} | {toPersianNums(detailSeries.year)}</p>
                 </div>
@@ -3328,6 +3812,16 @@ export default function SeriesPage({
                           >
                             <Sparkles className="w-3.5 h-3.5 text-sky-200 animate-pulse" />
                             <span>تطبیق خودکار پسوندها از روی دیسک</span>
+                          </button>
+
+                          <button
+                            type="button"
+                            onClick={handleAutoRenameEpisodeFiles}
+                            className="px-2.5 py-1 bg-amber-600 hover:bg-amber-500 text-white rounded text-[10px] font-bold cursor-pointer transition-all flex items-center gap-1.5 shadow-sm"
+                            title="تغییر نام خودکار و فیزیکی فایل‌های ویدئویی این فصل بر روی هارد دیسک بر اساس الگوی استاندارد و منظم (مثلاً Aban-S01E01.mp4)"
+                          >
+                            <Sparkles className="w-3.5 h-3.5 text-amber-200 animate-pulse" />
+                            <span>تغییر نام فیزیکی فایل‌های این فصل</span>
                           </button>
 
                           <button
@@ -4097,34 +4591,75 @@ export default function SeriesPage({
 
               {/* Grid of Images to choose */}
               <div className="space-y-3">
-                <span className="text-xs font-bold text-gray-600 dark:text-gray-300 block">تصاویر موجود جهت دانلود (برای انتخاب کلیک کنید):</span>
+                <span className="text-xs font-bold text-gray-600 dark:text-gray-300 block">انتخاب و تخصیص نقش برای هر تصویر جهت دانلود و ذخیره:</span>
                 
                 <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
                   {/* Poster Column */}
                   <div className="space-y-2">
-                    <span className="text-[11px] font-bold text-gray-500 block">پوستر اصلی سریال (Poster):</span>
+                    <span className="text-[11px] font-bold text-gray-500 block">تصویر ۱ (Poster پیش‌فرض):</span>
                     {fetchedImages.poster ? (
-                      <div 
-                        onClick={() => setSelectedImagesToDownload(prev => ({ ...prev, poster: !prev.poster }))}
-                        className={`relative aspect-[2/3] rounded-xl overflow-hidden border-2 cursor-pointer transition-all group ${
-                          selectedImagesToDownload.poster 
-                            ? 'border-indigo-600 ring-2 ring-indigo-600/30 shadow-lg' 
-                            : 'border-gray-200 dark:border-gray-800 opacity-60 hover:opacity-100'
-                        }`}
-                      >
-                        <img 
-                          src={fetchedImages.poster} 
-                          alt="Poster" 
-                          className="w-full h-full object-cover"
-                          referrerPolicy="no-referrer"
-                        />
-                        <div className={`absolute inset-0 bg-black/40 transition-all flex items-center justify-center ${selectedImagesToDownload.poster ? 'opacity-100' : 'opacity-0 group-hover:opacity-100'}`}>
-                          <div className={`w-10 h-10 rounded-full flex items-center justify-center text-white ${selectedImagesToDownload.poster ? 'bg-indigo-600' : 'bg-gray-600'}`}>
-                            <Check className="w-5 h-5" />
+                      <div className="space-y-2 bg-white dark:bg-slate-900 p-2.5 rounded-xl border border-gray-150 dark:border-slate-800">
+                        <div 
+                          className={`relative aspect-[2/3] rounded-lg overflow-hidden border-2 transition-all ${
+                            imageAssignments.poster === 'poster' ? 'border-indigo-600 shadow-md' :
+                            imageAssignments.poster === 'gallery' ? 'border-emerald-600 shadow-md' :
+                            'border-gray-200 dark:border-gray-800 opacity-45'
+                          }`}
+                        >
+                          <img 
+                            src={fetchedImages.poster} 
+                            alt="Poster" 
+                            className="w-full h-full object-cover"
+                            referrerPolicy="no-referrer"
+                          />
+                          {imageAssignments.poster === 'poster' && (
+                            <span className="absolute top-2 right-2 bg-indigo-600 text-white text-[9px] font-bold px-2 py-0.5 rounded-full shadow-md z-10">🖼️ پوستر اصلی</span>
+                          )}
+                          {imageAssignments.poster === 'gallery' && (
+                            <span className="absolute top-2 right-2 bg-emerald-600 text-white text-[9px] font-bold px-2 py-0.5 rounded-full shadow-md z-10">📷 گالری تصاویر</span>
+                          )}
+                          {imageAssignments.poster === 'none' && (
+                            <span className="absolute top-2 right-2 bg-gray-500 text-white text-[9px] font-bold px-2 py-0.5 rounded-full shadow-md z-10">❌ عدم انتخاب</span>
+                          )}
+                          <div className="absolute bottom-2 left-2 right-2 bg-black/60 backdrop-blur-sm rounded px-2 py-0.5 text-center">
+                            <span className="text-[8px] font-bold text-white font-mono">poster.jpg</span>
                           </div>
                         </div>
-                        <div className="absolute bottom-2 left-2 right-2 bg-black/60 backdrop-blur-sm rounded-lg px-2 py-1 text-center">
-                          <span className="text-[9px] font-bold text-white">نام فایل: poster.jpg</span>
+                        {/* Selector Buttons */}
+                        <div className="flex gap-1 justify-center">
+                          <button
+                            type="button"
+                            onClick={() => assignImageRole('poster', 'poster')}
+                            className={`flex-1 py-1 rounded text-[10px] font-bold transition-all cursor-pointer border-none ${
+                              imageAssignments.poster === 'poster' 
+                                ? 'bg-indigo-600 text-white shadow-sm' 
+                                : 'bg-gray-100 dark:bg-slate-800 text-gray-500 hover:bg-gray-200 dark:hover:bg-slate-700'
+                            }`}
+                          >
+                            پوستر اصلی
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() => assignImageRole('poster', 'gallery')}
+                            className={`flex-1 py-1 rounded text-[10px] font-bold transition-all cursor-pointer border-none ${
+                              imageAssignments.poster === 'gallery' 
+                                ? 'bg-emerald-600 text-white shadow-sm' 
+                                : 'bg-gray-100 dark:bg-slate-800 text-gray-500 hover:bg-gray-200 dark:hover:bg-slate-700'
+                            }`}
+                          >
+                            گالری
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() => assignImageRole('poster', 'none')}
+                            className={`py-1 px-2 rounded text-[10px] font-bold transition-all cursor-pointer border-none ${
+                              imageAssignments.poster === 'none' 
+                                ? 'bg-gray-600 text-white' 
+                                : 'bg-gray-100 dark:bg-slate-800 text-gray-400 hover:bg-gray-200 dark:hover:bg-slate-700'
+                            }`}
+                          >
+                            ❌
+                          </button>
                         </div>
                       </div>
                     ) : (
@@ -4136,29 +4671,70 @@ export default function SeriesPage({
 
                   {/* Backdrop Column */}
                   <div className="space-y-2 md:col-span-2">
-                    <span className="text-[11px] font-bold text-gray-500 block">تصویر پس‌زمینه (Backdrop):</span>
+                    <span className="text-[11px] font-bold text-gray-500 block">تصویر ۲ (Backdrop پیش‌فرض):</span>
                     {fetchedImages.backdrop ? (
-                      <div 
-                        onClick={() => setSelectedImagesToDownload(prev => ({ ...prev, backdrop: !prev.backdrop }))}
-                        className={`relative aspect-[16/9] rounded-xl overflow-hidden border-2 cursor-pointer transition-all group ${
-                          selectedImagesToDownload.backdrop 
-                            ? 'border-indigo-600 ring-2 ring-indigo-600/30 shadow-lg' 
-                            : 'border-gray-200 dark:border-gray-800 opacity-60 hover:opacity-100'
-                        }`}
-                      >
-                        <img 
-                          src={fetchedImages.backdrop} 
-                          alt="Backdrop" 
-                          className="w-full h-full object-cover"
-                          referrerPolicy="no-referrer"
-                        />
-                        <div className={`absolute inset-0 bg-black/40 transition-all flex items-center justify-center ${selectedImagesToDownload.backdrop ? 'opacity-100' : 'opacity-0 group-hover:opacity-100'}`}>
-                          <div className={`w-10 h-10 rounded-full flex items-center justify-center text-white ${selectedImagesToDownload.backdrop ? 'bg-indigo-600' : 'bg-gray-600'}`}>
-                            <Check className="w-5 h-5" />
+                      <div className="space-y-2 bg-white dark:bg-slate-900 p-2.5 rounded-xl border border-gray-150 dark:border-slate-800">
+                        <div 
+                          className={`relative aspect-[16/9] rounded-lg overflow-hidden border-2 transition-all ${
+                            imageAssignments.backdrop === 'poster' ? 'border-indigo-600 shadow-md' :
+                            imageAssignments.backdrop === 'gallery' ? 'border-emerald-600 shadow-md' :
+                            'border-gray-200 dark:border-gray-800 opacity-45'
+                          }`}
+                        >
+                          <img 
+                            src={fetchedImages.backdrop} 
+                            alt="Backdrop" 
+                            className="w-full h-full object-cover"
+                            referrerPolicy="no-referrer"
+                          />
+                          {imageAssignments.backdrop === 'poster' && (
+                            <span className="absolute top-2 right-2 bg-indigo-600 text-white text-[9px] font-bold px-2 py-0.5 rounded-full shadow-md z-10">🖼️ پوستر اصلی</span>
+                          )}
+                          {imageAssignments.backdrop === 'gallery' && (
+                            <span className="absolute top-2 right-2 bg-emerald-600 text-white text-[9px] font-bold px-2 py-0.5 rounded-full shadow-md z-10">📷 گالری تصاویر</span>
+                          )}
+                          {imageAssignments.backdrop === 'none' && (
+                            <span className="absolute top-2 right-2 bg-gray-500 text-white text-[9px] font-bold px-2 py-0.5 rounded-full shadow-md z-10">❌ عدم انتخاب</span>
+                          )}
+                          <div className="absolute bottom-2 left-2 right-2 bg-black/60 backdrop-blur-sm rounded px-2 py-0.5 text-center">
+                            <span className="text-[8px] font-bold text-white font-mono">backdrop.jpg</span>
                           </div>
                         </div>
-                        <div className="absolute bottom-2 left-2 right-2 bg-black/60 backdrop-blur-sm rounded-lg px-2 py-1 text-center">
-                          <span className="text-[9px] font-bold text-white">نام فایل: backdrop.jpg</span>
+                        {/* Selector Buttons */}
+                        <div className="flex gap-1 justify-center">
+                          <button
+                            type="button"
+                            onClick={() => assignImageRole('backdrop', 'poster')}
+                            className={`flex-1 py-1 rounded text-[10px] font-bold transition-all cursor-pointer border-none ${
+                              imageAssignments.backdrop === 'poster' 
+                                ? 'bg-indigo-600 text-white shadow-sm' 
+                                : 'bg-gray-100 dark:bg-slate-800 text-gray-500 hover:bg-gray-200 dark:hover:bg-slate-700'
+                            }`}
+                          >
+                            پوستر اصلی
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() => assignImageRole('backdrop', 'gallery')}
+                            className={`flex-1 py-1 rounded text-[10px] font-bold transition-all cursor-pointer border-none ${
+                              imageAssignments.backdrop === 'gallery' 
+                                ? 'bg-emerald-600 text-white shadow-sm' 
+                                : 'bg-gray-100 dark:bg-slate-800 text-gray-500 hover:bg-gray-200 dark:hover:bg-slate-700'
+                            }`}
+                          >
+                            گالری
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() => assignImageRole('backdrop', 'none')}
+                            className={`py-1 px-2 rounded text-[10px] font-bold transition-all cursor-pointer border-none ${
+                              imageAssignments.backdrop === 'none' 
+                                ? 'bg-gray-600 text-white' 
+                                : 'bg-gray-100 dark:bg-slate-800 text-gray-400 hover:bg-gray-200 dark:hover:bg-slate-700'
+                            }`}
+                          >
+                            ❌
+                          </button>
                         </div>
                       </div>
                     ) : (
@@ -4174,38 +4750,75 @@ export default function SeriesPage({
                   <div className="space-y-2 pt-2">
                     <span className="text-[11px] font-bold text-gray-500 block">سایر تصاویر گالری سریال (Scenes):</span>
                     <div className="grid grid-cols-2 sm:grid-cols-3 gap-3">
-                      {fetchedImages.gallery.map((url, idx) => (
-                        <div 
-                          key={idx}
-                          onClick={() => {
-                            setSelectedImagesToDownload(prev => {
-                              const newGal = [...prev.gallery];
-                              newGal[idx] = !newGal[idx];
-                              return { ...prev, gallery: newGal };
-                            });
-                          }}
-                          className={`relative aspect-[16/9] rounded-xl overflow-hidden border-2 cursor-pointer transition-all group ${
-                            selectedImagesToDownload.gallery[idx] 
-                              ? 'border-indigo-600 ring-2 ring-indigo-600/30 shadow-lg' 
-                              : 'border-gray-200 dark:border-gray-800 opacity-60 hover:opacity-100'
-                          }`}
-                        >
-                          <img 
-                            src={url} 
-                            alt={`Gallery scene ${idx + 1}`} 
-                            className="w-full h-full object-cover"
-                            referrerPolicy="no-referrer"
-                          />
-                          <div className={`absolute inset-0 bg-black/40 transition-all flex items-center justify-center ${selectedImagesToDownload.gallery[idx] ? 'opacity-100' : 'opacity-0 group-hover:opacity-100'}`}>
-                            <div className={`w-8 h-8 rounded-full flex items-center justify-center text-white ${selectedImagesToDownload.gallery[idx] ? 'bg-indigo-600' : 'bg-gray-600'}`}>
-                              <Check className="w-4 h-4" />
+                      {fetchedImages.gallery.map((url, idx) => {
+                        const currentRole = imageAssignments.gallery[idx];
+                        return (
+                          <div key={idx} className="space-y-2 bg-white dark:bg-slate-900 p-2 rounded-xl border border-gray-150 dark:border-slate-800">
+                            <div 
+                              className={`relative aspect-[16/9] rounded-lg overflow-hidden border-2 transition-all ${
+                                currentRole === 'poster' ? 'border-indigo-600 shadow-md' :
+                                currentRole === 'gallery' ? 'border-emerald-600 shadow-md' :
+                                'border-gray-200 dark:border-gray-800 opacity-45'
+                              }`}
+                            >
+                              <img 
+                                src={url} 
+                                alt={`Gallery scene ${idx + 1}`} 
+                                className="w-full h-full object-cover"
+                                referrerPolicy="no-referrer"
+                              />
+                              {currentRole === 'poster' && (
+                                <span className="absolute top-2 right-2 bg-indigo-600 text-white text-[9px] font-bold px-1.5 py-0.5 rounded-full shadow-md z-10">🖼️ پوستر اصلی</span>
+                              )}
+                              {currentRole === 'gallery' && (
+                                <span className="absolute top-2 right-2 bg-emerald-600 text-white text-[9px] font-bold px-1.5 py-0.5 rounded-full shadow-md z-10">📷 گالری تصاویر</span>
+                              )}
+                              {currentRole === 'none' && (
+                                <span className="absolute top-2 right-2 bg-gray-500 text-white text-[9px] font-bold px-1.5 py-0.5 rounded-full shadow-md z-10">❌ عدم انتخاب</span>
+                              )}
+                              <div className="absolute bottom-1.5 left-1.5 right-1.5 bg-black/60 backdrop-blur-sm rounded px-1.5 py-0.5 text-center">
+                                <span className="text-[8px] font-bold text-white">gallery_{idx + 1}.jpg</span>
+                              </div>
+                            </div>
+                            {/* Selector Buttons */}
+                            <div className="flex gap-1 justify-center">
+                              <button
+                                type="button"
+                                onClick={() => assignImageRole(idx, 'poster')}
+                                className={`flex-1 py-0.5 rounded text-[9px] font-bold transition-all cursor-pointer border-none ${
+                                  currentRole === 'poster' 
+                                    ? 'bg-indigo-600 text-white shadow-sm' 
+                                    : 'bg-gray-100 dark:bg-slate-800 text-gray-500 hover:bg-gray-200'
+                                }`}
+                              >
+                                پوستر
+                              </button>
+                              <button
+                                type="button"
+                                onClick={() => assignImageRole(idx, 'gallery')}
+                                className={`flex-1 py-0.5 rounded text-[9px] font-bold transition-all cursor-pointer border-none ${
+                                  currentRole === 'gallery' 
+                                    ? 'bg-emerald-600 text-white shadow-sm' 
+                                    : 'bg-gray-100 dark:bg-slate-800 text-gray-500 hover:bg-gray-200'
+                                }`}
+                              >
+                                گالری
+                              </button>
+                              <button
+                                type="button"
+                                onClick={() => assignImageRole(idx, 'none')}
+                                className={`py-0.5 px-1.5 rounded text-[9px] font-bold transition-all cursor-pointer border-none ${
+                                  currentRole === 'none' 
+                                    ? 'bg-gray-600 text-white shadow-sm' 
+                                    : 'bg-gray-100 dark:bg-slate-800 text-gray-400 hover:bg-gray-200'
+                                }`}
+                              >
+                                ❌
+                              </button>
                             </div>
                           </div>
-                          <div className="absolute bottom-1.5 left-1.5 right-1.5 bg-black/60 backdrop-blur-sm rounded px-1.5 py-0.5 text-center">
-                            <span className="text-[8px] font-bold text-white">gallery_{idx + 1}.jpg</span>
-                          </div>
-                        </div>
-                      ))}
+                        );
+                      })}
                     </div>
                   </div>
                 )}
@@ -4215,10 +4828,10 @@ export default function SeriesPage({
             {/* Footer */}
             <div className="px-6 py-4 bg-gray-50 dark:bg-slate-950/40 border-t border-gray-150 dark:border-slate-800 flex items-center justify-between">
               <span className="text-[10px] text-gray-500">
-                کل تصاویر انتخابی: {[
-                  selectedImagesToDownload.poster, 
-                  selectedImagesToDownload.backdrop, 
-                  ...selectedImagesToDownload.gallery.filter(Boolean)
+                کل تصاویر انتخابی جهت دانلود: {[
+                  imageAssignments.poster !== 'none',
+                  imageAssignments.backdrop !== 'none',
+                  ...imageAssignments.gallery.map(g => g !== 'none')
                 ].filter(Boolean).length} عدد
               </span>
 

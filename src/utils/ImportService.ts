@@ -7,6 +7,7 @@ import { dbService } from '../db/databaseService';
 import { ScannedMediaItem } from './MediaScanner';
 import { Movie, Series, Season, Episode } from '../types';
 import { ParsedMovie, ParsedSeries } from './FilenameParser';
+import { TMDbService } from './TMDbService';
 
 export class ImportService {
   /**
@@ -28,8 +29,115 @@ export class ImportService {
     const defaultMoviePrice = settings?.defaultMoviePrice || 2000;
     const defaultSeriesPrice = settings?.defaultSeriesPrice || 1500;
 
+    // Cache to avoid searching TMDb and downloading posters multiple times for the same series folder or name
+    const seriesFolderCache = new Map<string, any>();
+
     for (const item of selectedItems) {
       try {
+        // If series, try to reconstruct dummy TMDb match from existing series in DB first to be fully offline and avoid downloads
+        if (item.parsed.isSeries && !item.tmdb) {
+          const parsedSeries = item.parsed as ParsedSeries;
+          const seriesNameKey = parsedSeries.seriesName.trim();
+          const existingSeriesList = dbService.getSeries();
+          const dbSeriesItem = existingSeriesList.find(s => 
+            s.titleFa.toLowerCase().trim() === seriesNameKey.toLowerCase() ||
+            s.titleEn.toLowerCase().trim() === seriesNameKey.toLowerCase()
+          );
+
+          if (dbSeriesItem) {
+            item.tmdb = {
+              id: dbSeriesItem.officialSite ? parseInt(dbSeriesItem.officialSite.split('/').pop() || '0', 10) : 0,
+              title: dbSeriesItem.titleFa,
+              originalTitle: dbSeriesItem.titleEn,
+              posterPath: dbSeriesItem.poster,
+              backdropPath: dbSeriesItem.poster,
+              overview: dbSeriesItem.summary,
+              releaseDate: dbSeriesItem.year,
+              rating: parseFloat(dbSeriesItem.imdbRating) || 0.0,
+              genres: dbSeriesItem.genres || [],
+              cast: dbSeriesItem.actors ? dbSeriesItem.actors.split(', ') : [],
+              director: dbSeriesItem.director ? dbSeriesItem.director.split(', ') : [],
+              runtime: parseInt(dbSeriesItem.episodeDuration) || 45,
+              countries: [dbSeriesItem.country || ''],
+              gallery: dbSeriesItem.gallery || [],
+              voteCount: 0,
+              productionCompanies: [],
+              mediaType: 'tv'
+            };
+            item.matchStatus = 'matched';
+          }
+        }
+
+        // If series, we can also check the in-memory cache keyed by series name
+        if (item.parsed.isSeries) {
+          const parsedSeries = item.parsed as ParsedSeries;
+          const sKey = parsedSeries.seriesName.toLowerCase().trim();
+          if (seriesFolderCache.has(sKey)) {
+            const cachedTmdb = seriesFolderCache.get(sKey);
+            if (cachedTmdb) {
+              item.tmdb = JSON.parse(JSON.stringify(cachedTmdb));
+              item.matchStatus = 'matched';
+            }
+          }
+        }
+
+        // Dynamic, on-demand TMDb lookup and local image caching on selection
+        if (!item.tmdb) {
+          try {
+            const parts = item.file.folder.split(/[/\\]/);
+            const parentFolderName = parts[parts.length - 1] || '';
+            const tmdbMatch = await TMDbService.findBestMatch(item.parsed, parentFolderName);
+            if (tmdbMatch) {
+              item.tmdb = tmdbMatch;
+              item.matchStatus = 'matched';
+
+              // Download posters and backdrop locally inside film directory under /pic/
+              if (window.electronAPI && window.electronAPI.savePosterLocal) {
+                const isWindows = item.file.folder.includes('\\');
+                const picFolder = item.file.folder + (isWindows ? '\\pic' : '/pic');
+
+                // A. Save poster
+                if (item.tmdb.posterPath) {
+                  const posterRes = await window.electronAPI.savePosterLocal(item.tmdb.posterPath, picFolder, 'poster');
+                  if (posterRes && posterRes.success) {
+                    item.tmdb.posterPath = posterRes.savedPath;
+                  }
+                }
+
+                // B. Save backdrop
+                if (item.tmdb.backdropPath) {
+                  const backdropRes = await window.electronAPI.savePosterLocal(item.tmdb.backdropPath, picFolder, 'backdrop');
+                  if (backdropRes && backdropRes.success) {
+                    item.tmdb.backdropPath = backdropRes.savedPath;
+                  }
+                }
+
+                // C. Save gallery (scenes)
+                if (item.tmdb.gallery && item.tmdb.gallery.length > 0) {
+                  const localGallery: string[] = [];
+                  for (let i = 0; i < Math.min(item.tmdb.gallery.length, 3); i++) {
+                    const imgUrl = item.tmdb.gallery[i];
+                    const gallRes = await window.electronAPI.savePosterLocal(imgUrl, picFolder, `gallery_${i + 1}`);
+                    if (gallRes && gallRes.success) {
+                      localGallery.push(gallRes.savedPath);
+                    }
+                  }
+                  item.tmdb.gallery = localGallery;
+                }
+              }
+
+              // Store in cache for subsequent episodes using series name as key
+              if (item.parsed.isSeries) {
+                const parsedSeries = item.parsed as ParsedSeries;
+                const sKey = parsedSeries.seriesName.toLowerCase().trim();
+                seriesFolderCache.set(sKey, JSON.parse(JSON.stringify(item.tmdb)));
+              }
+            }
+          } catch (tmdbErr) {
+            console.error('TMDb dynamic lookup failed on import for:', item.file.filename, tmdbErr);
+          }
+        }
+
         if (item.parsed.isSeries) {
           // --- TV SERIES IMPORT ---
           const parsedSeries = item.parsed as ParsedSeries;

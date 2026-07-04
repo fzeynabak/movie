@@ -86,6 +86,23 @@ export default function CartBar({
 
   const [isCopyingAll, setIsCopyingAll] = useState(false);
   const currentCopyIndicesRef = useRef<Record<string, { current: number; total: number }>>({});
+  const cancelledCopiesRef = useRef<Record<string, boolean>>({});
+
+  const handleCancelCopy = async (itemId: string) => {
+    cancelledCopiesRef.current[itemId] = true;
+    if (window.electronAPI && window.electronAPI.cancelCopy) {
+      await window.electronAPI.cancelCopy(itemId);
+    }
+    setCopyProgress(prev => ({
+      ...prev,
+      [itemId]: {
+        ...prev[itemId],
+        completed: false,
+        error: 'عملیات کپی توسط اپراتور لغو شد.'
+      }
+    }));
+    showToast('عملیات کپی لغو شد.', 'info');
+  };
 
   useEffect(() => {
     if (window.electronAPI && window.electronAPI.onCopyProgress) {
@@ -219,6 +236,9 @@ export default function CartBar({
       return false;
     }
     
+    // Clear cancelled state
+    cancelledCopiesRef.current[item.id] = false;
+
     setCopyProgress(prev => ({
       ...prev,
       [item.id]: {
@@ -235,6 +255,11 @@ export default function CartBar({
     if (window.electronAPI && window.electronAPI.copyFileToUsb) {
       let copyCount = 0;
       for (let i = 0; i < pathsToCopy.length; i++) {
+        // Instant abort if cancelled by user
+        if (cancelledCopiesRef.current[item.id]) {
+          break;
+        }
+
         const sourcePath = pathsToCopy[i];
         currentCopyIndicesRef.current[item.id].current = i;
         
@@ -244,12 +269,14 @@ export default function CartBar({
         let alreadyExists = false;
         if (window.electronAPI.existsFile) {
           try {
-            const checkRes = await window.electronAPI.existsFile(absoluteDestPath);
-            if (checkRes && checkRes.exists) {
+            const destCheck = await window.electronAPI.existsFile(absoluteDestPath);
+            const sourceCheck = await window.electronAPI.existsFile(sourcePath);
+            // Verify BOTH exists and the sizes match exactly
+            if (destCheck && destCheck.exists && sourceCheck && sourceCheck.exists && destCheck.size === sourceCheck.size) {
               alreadyExists = true;
             }
           } catch (err) {
-            console.error('Error checking file existence:', err);
+            console.error('Error checking file existence and size:', err);
           }
         }
         
@@ -273,6 +300,10 @@ export default function CartBar({
         try {
           const res = await window.electronAPI.copyFileToUsb(sourcePath, destDir, item.id, customRelativePath);
           if (res && !res.success) {
+            // Check if failure is due to user abort
+            if (cancelledCopiesRef.current[item.id]) {
+              break;
+            }
             setCopyProgress(prev => ({
               ...prev,
               [item.id]: {
@@ -285,6 +316,9 @@ export default function CartBar({
             return false;
           }
         } catch (err) {
+          if (cancelledCopiesRef.current[item.id]) {
+            break;
+          }
           setCopyProgress(prev => ({
             ...prev,
             [item.id]: {
@@ -298,6 +332,10 @@ export default function CartBar({
         }
       }
       
+      if (cancelledCopiesRef.current[item.id]) {
+        return false;
+      }
+
       setCopyProgress(prev => ({
         ...prev,
         [item.id]: {
@@ -979,6 +1017,18 @@ export default function CartBar({
                                         <span>کپی به فلش</span>
                                       </>
                                     )}
+                                  </button>
+                                )}
+
+                                {/* Cancel Copy Button */}
+                                {progressInfo && !progressInfo.completed && !progressInfo.error && (
+                                  <button
+                                    type="button"
+                                    onClick={() => handleCancelCopy(item.id)}
+                                    className="p-1.5 bg-red-50 hover:bg-red-100 dark:bg-red-950/40 dark:hover:bg-red-950/60 text-red-600 dark:text-red-400 rounded-lg transition-colors cursor-pointer flex items-center justify-center animate-pulse"
+                                    title="لغو کپی فایل"
+                                  >
+                                    <X className="w-3.5 h-3.5" />
                                   </button>
                                 )}
 

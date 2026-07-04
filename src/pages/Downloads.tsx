@@ -38,7 +38,10 @@ import {
   Square,
   FileText,
   Settings2,
-  RefreshCw
+  RefreshCw,
+  FolderOpen,
+  Smartphone,
+  Key
 } from 'lucide-react';
 
 export interface DownloadItem {
@@ -216,6 +219,58 @@ export default function Downloads() {
   const [grabberSelectedSeriesId, setGrabberSelectedSeriesId] = useState<string>('none');
   const [grabberSeasonNum, setGrabberSeasonNum] = useState<number>(1);
   const [grabberDownloadSubtitles, setGrabberDownloadSubtitles] = useState<boolean>(true);
+
+  // New Telegram Web Explorer States
+  const [downloadsViewTab, setDownloadsViewTab] = useState<'queue' | 'telegram_browser'>('queue');
+  const [tgWebVersion, setTgWebVersion] = useState<'k' | 'a'>('k');
+  const [telegramGrabUrl, setTelegramGrabUrl] = useState('');
+  const [telegramGrabTitle, setTelegramGrabTitle] = useState('');
+  const [telegramGrabMediaType, setTelegramGrabMediaType] = useState<'movie' | 'series' | 'other'>('movie');
+  const [telegramGrabFolder, setTelegramGrabFolder] = useState('D:/Downloads/Telegram');
+  const [telegramGrabSizeGb, setTelegramGrabSizeGb] = useState<number>(1.4);
+  const [autoGrabClipboard, setAutoGrabClipboard] = useState(true);
+
+  const lastClipboardRef = useRef('');
+
+  useEffect(() => {
+    if (!autoGrabClipboard || downloadsViewTab !== 'telegram_browser') return;
+
+    const interval = setInterval(async () => {
+      try {
+        if (!document.hasFocus()) return;
+        const text = await navigator.clipboard.readText();
+        if (text && text.trim() !== lastClipboardRef.current) {
+          const trimmed = text.trim();
+          if (
+            trimmed.includes('t.me/') || 
+            trimmed.includes('telegram.me/') || 
+            trimmed.includes('web.telegram.org') || 
+            trimmed.startsWith('tg://')
+          ) {
+            lastClipboardRef.current = trimmed;
+            setTelegramGrabUrl(trimmed);
+            
+            // Auto-parse a title
+            let autoTitle = 'فیلم تلگرامی جدید';
+            const parts = trimmed.split('/');
+            const lastPart = parts[parts.length - 1];
+            const secondLast = parts[parts.length - 2];
+            if (Number(lastPart) && secondLast) {
+              autoTitle = `فیلم کانال ${secondLast} (پست ${lastPart})`;
+            } else if (lastPart && !lastPart.startsWith('#')) {
+              autoTitle = `فایل تلگرام - ${decodeURIComponent(lastPart)}`;
+            }
+            setTelegramGrabTitle(autoTitle);
+            showToast(`یک لینک تلگرام در کلیپ‌بورد شناسایی و بارگذاری شد! ✨`, 'success');
+          }
+        }
+      } catch (e) {
+        // clipboard access blocked
+      }
+    }, 1500);
+
+    return () => clearInterval(interval);
+  }, [autoGrabClipboard, downloadsViewTab]);
 
   // Telegram direct connections
   const [telegramSessionActive, setTelegramSessionActive] = useState<boolean>(() => {
@@ -781,6 +836,9 @@ export default function Downloads() {
       ? `https://image.tmdb.org/t/p/w400${selectedTmdbItem.poster_path}` 
       : 'https://images.unsplash.com/photo-1594909122845-11baa439b7bf?auto=format&fit=crop&q=80&w=400';
 
+    const cleanFileName = title.replace(/[\s\/:*?"<>|]+/g, '_');
+    const subPath = downloadSubtitle ? `${saveFolder}/${cleanFileName}.srt`.replace(/\\/g, '/') : undefined;
+
     const newDl: DownloadItem = {
       id: `dl-${Date.now()}`,
       title,
@@ -795,13 +853,37 @@ export default function Downloads() {
       totalBytes: mediaType === 'movie' ? 1900000000 : 850000000, // Simulated sizes
       speedMbs: 0,
       scheduledTime: isScheduled ? scheduleTimeInput : undefined,
-      addedAt: new Date().toISOString()
+      addedAt: new Date().toISOString(),
+      seriesId: mediaType === 'series' ? selectedSeriesId : undefined,
+      seasonNum: mediaType === 'series' ? selectedSeasonNum : undefined,
+      episodeNum: mediaType === 'series' ? selectedEpisodeNum : undefined,
+      subtitlePath: subPath
     };
 
-    setDownloads(prev => [newDl, ...prev]);
+    const listToAdd: DownloadItem[] = [newDl];
+
+    if (downloadSubtitle) {
+      const subDl: DownloadItem = {
+        id: `dl-sub-${Date.now()}`,
+        title: `${title} (زیرنویس فارسی اختصاصی)`,
+        mediaType: 'other',
+        url: downloadUrl.replace(/\.(mp4|mkv|avi|mov)$/i, '.srt'),
+        saveFolder: saveFolder.replace(/\\/g, '/'),
+        status: isScheduled ? 'scheduled' : 'queued',
+        progress: 0,
+        bytesDownloaded: 0,
+        totalBytes: 150 * 1024, // 150 KB
+        speedMbs: 0,
+        scheduledTime: isScheduled ? scheduleTimeInput : undefined,
+        addedAt: new Date().toISOString()
+      };
+      listToAdd.push(subDl);
+    }
+
+    setDownloads(prev => [...listToAdd, ...prev]);
     setShowAddModal(false);
     resetForm();
-    showToast(`لینک دانلود "${title}" با موفقیت اضافه شد.`, 'success');
+    showToast(`لینک دانلود "${title}" ${downloadSubtitle ? 'به همراه زیرنویس فارسی' : ''} با موفقیت اضافه شد.`, 'success');
   };
 
   const resetForm = () => {
@@ -812,6 +894,10 @@ export default function Downloads() {
     setTmdbResults([]);
     setSelectedTmdbItem(null);
     setIsScheduled(false);
+    setSelectedSeriesId('none');
+    setSelectedSeasonNum(1);
+    setSelectedEpisodeNum(1);
+    setDownloadSubtitle(false);
   };
 
   // Telegram Quick Downloader simulation
@@ -856,6 +942,59 @@ export default function Downloads() {
     setDownloads(prev => [newDl, ...prev]);
     setTelegramLink('');
     showToast(`لینک تلگرام آنالیز شد و با حجم تخمینی ${formatBytes(totalBytes)} به صف دانلود اضافه گردید.`, 'success');
+  };
+
+  const handleDownloadTelegramMessage = (msg: any) => {
+    const poster = msg.fileName.toLowerCase().includes('walking') || msg.text.toLowerCase().includes('walking')
+      ? 'https://images.unsplash.com/photo-1509347528160-9a9e33742cdb?auto=format&fit=crop&q=80&w=400'
+      : msg.fileName.toLowerCase().includes('dragon')
+        ? 'https://images.unsplash.com/photo-1594909122845-11baa439b7bf?auto=format&fit=crop&q=80&w=400'
+        : 'https://images.unsplash.com/photo-1536440136628-849c177e76a1?auto=format&fit=crop&q=80&w=400';
+
+    const cleanFileName = msg.fileName.replace(/[\s\/:*?"<>|]+/g, '_');
+    const folder = 'D:/TelegramDownloads';
+    const subPath = msg.hasSubtitle ? `${folder}/${cleanFileName}.srt`.replace(/\\/g, '/') : undefined;
+
+    const mainDl: DownloadItem = {
+      id: `dl-tg-${Date.now()}-main`,
+      title: msg.fileName.replace(/\.(mp4|mkv|avi)$/i, ''),
+      mediaType: msg.detectedEpisode > 0 ? 'series' : 'movie',
+      posterPath: poster,
+      url: `telegram://msg/${msg.id}/${msg.fileName}`,
+      saveFolder: folder,
+      status: 'queued',
+      progress: 0,
+      bytesDownloaded: 0,
+      totalBytes: msg.sizeBytes,
+      speedMbs: 0,
+      addedAt: new Date().toISOString(),
+      seriesId: msg.detectedEpisode > 0 ? msg.detectedSeriesId : undefined,
+      seasonNum: msg.detectedEpisode > 0 ? msg.detectedSeason : undefined,
+      episodeNum: msg.detectedEpisode > 0 ? msg.detectedEpisode : undefined,
+      subtitlePath: subPath
+    };
+
+    const listToAdd: DownloadItem[] = [mainDl];
+
+    if (msg.hasSubtitle) {
+      const subDl: DownloadItem = {
+        id: `dl-tg-${Date.now()}-sub`,
+        title: `${msg.fileName.replace(/\.(mp4|mkv|avi)$/i, '')} (زیرنویس تلگرامی)`,
+        mediaType: 'other',
+        url: `telegram://msg/${msg.id}/${msg.subName}`,
+        saveFolder: folder,
+        status: 'queued',
+        progress: 0,
+        bytesDownloaded: 0,
+        totalBytes: 150 * 1024,
+        speedMbs: 0,
+        addedAt: new Date().toISOString()
+      };
+      listToAdd.push(subDl);
+    }
+
+    setDownloads(prev => [...listToAdd, ...prev]);
+    showToast(`فایل "${msg.fileName}" ${msg.hasSubtitle ? 'به همراه زیرنویس فارسی' : ''} با موفقیت به صف دانلود IDM اضافه شد!`, 'success');
   };
 
   // Edit Download Handlers
@@ -993,14 +1132,20 @@ export default function Downloads() {
       return;
     }
 
-    const newDownloads: DownloadItem[] = selectedList.map((item, idx) => {
+    const listToAdd: DownloadItem[] = [];
+
+    selectedList.forEach((item, idx) => {
       const poster = grabberMediaType === 'movie'
         ? 'https://images.unsplash.com/photo-1594909122845-11baa439b7bf?auto=format&fit=crop&q=80&w=400'
         : grabberMediaType === 'series'
           ? 'https://images.unsplash.com/photo-1509347528160-9a9e33742cdb?auto=format&fit=crop&q=80&w=400'
           : 'https://images.unsplash.com/photo-1536440136628-849c177e76a1?auto=format&fit=crop&q=80&w=400';
 
-      return {
+      const parsed = parseSeasonAndEpisode(item.title);
+      const cleanFileName = item.title.replace(/[\s\/:*?"<>|]+/g, '_');
+      const subtitlePath = grabberDownloadSubtitles ? `${grabberSaveFolder}/${cleanFileName}.srt`.replace(/\\/g, '/') : undefined;
+
+      const mainDl: DownloadItem = {
         id: `dl-grab-${Date.now()}-${idx}`,
         title: item.title,
         mediaType: grabberMediaType,
@@ -1012,15 +1157,38 @@ export default function Downloads() {
         bytesDownloaded: 0,
         totalBytes: item.sizeMb * 1024 * 1024,
         speedMbs: 0,
-        addedAt: new Date().toISOString()
+        addedAt: new Date().toISOString(),
+        seriesId: grabberMediaType === 'series' && grabberSelectedSeriesId !== 'none' ? grabberSelectedSeriesId : undefined,
+        seasonNum: grabberMediaType === 'series' ? (grabberSelectedSeriesId !== 'none' ? grabberSeasonNum : parsed.season) : undefined,
+        episodeNum: grabberMediaType === 'series' ? parsed.episode : undefined,
+        subtitlePath
       };
+
+      listToAdd.push(mainDl);
+
+      if (grabberDownloadSubtitles) {
+        const subDl: DownloadItem = {
+          id: `dl-sub-grab-${Date.now()}-${idx}`,
+          title: `${item.title} (زیرنویس فارسی اختصاصی)`,
+          mediaType: 'other',
+          url: item.url.replace(/\.(mp4|mkv|avi|mov)$/i, '.srt'),
+          saveFolder: grabberSaveFolder.replace(/\\/g, '/'),
+          status: 'queued',
+          progress: 0,
+          bytesDownloaded: 0,
+          totalBytes: 150 * 1024, // 150 KB
+          speedMbs: 0,
+          addedAt: new Date().toISOString()
+        };
+        listToAdd.push(subDl);
+      }
     });
 
-    setDownloads(prev => [...newDownloads, ...prev]);
+    setDownloads(prev => [...listToAdd, ...prev]);
     setShowClipboardModal(false);
     setClipboardText('');
     setExtractedLinks([]);
-    showToast(`${toPersianNums(newDownloads.length)} آیتم با موفقیت به صف دانلود IDM اضافه شدند!`, 'success');
+    showToast(`${toPersianNums(selectedList.length)} آیتم اصلی ${grabberDownloadSubtitles ? 'به همراه زیرنویس‌ها' : ''} با موفقیت به صف دانلود اضافه شدند!`, 'success');
   };
 
   // Helper formatting size bytes
@@ -1098,8 +1266,8 @@ export default function Downloads() {
         </div>
       </div>
 
-      {/* Primary Layout grid */}
-      <div className="flex-1 grid grid-cols-1 xl:grid-cols-4 gap-5 min-h-0">
+        /* Primary Layout grid */
+        <div className="flex-1 grid grid-cols-1 xl:grid-cols-4 gap-5 min-h-0 animate-fadeIn">
         
         {/* Left column: List of downloads */}
         <div className="xl:col-span-3 bg-white dark:bg-[#1e293b] rounded-2xl border border-gray-150 dark:border-gray-800 shadow-sm flex flex-col min-h-0">
@@ -1267,7 +1435,7 @@ export default function Downloads() {
                             : isCompleted 
                               ? 'text-emerald-600 dark:text-emerald-400'
                               : isScheduled
-                                ? 'text-amber-600 dark:text-amber-405'
+                                ? 'text-amber-600 dark:text-amber-404'
                                 : 'text-gray-500 dark:text-gray-400'
                         }`}>
                           {isDownloading && 'در حال دریافت'}
@@ -1382,71 +1550,27 @@ export default function Downloads() {
             </div>
           </div>
 
-          {/* Telegram Channels Direct Box */}
-          <div className="bg-gradient-to-tr from-sky-500/10 via-white to-indigo-500/10 dark:from-sky-950/15 dark:via-[#1e293b] dark:to-indigo-950/15 p-5 rounded-2xl border border-sky-100 dark:border-sky-900/30 shadow-sm space-y-4">
-            <div className="flex items-center gap-2 text-sky-600 dark:text-sky-400">
+          {/* Promotion Card for Telegram Web Explorer */}
+          <div className="bg-gradient-to-br from-sky-600 to-sky-700 text-white p-5 rounded-2xl border border-sky-500/25 shadow-xl space-y-4 text-right" dir="rtl">
+            <div className="flex items-center gap-2 text-sky-100">
               <Send className="w-4.5 h-4.5 shrink-0" />
-              <span className="text-xs font-black">ربات مستقیم دانلود تلگرام</span>
+              <span className="text-xs font-black">کاوشگر و دانلود مستقیم تلگرام وب</span>
             </div>
-
-            <p className="text-[10.5px] text-gray-500 dark:text-gray-400 leading-relaxed font-bold">
-              لینک یا یوزرنیم پست فیلم کانال تلگرامی را وارد کنید تا بات پیشرفته فایل را استخراج و برای دانلود مستقیم صف‌بندی کند:
+            
+            <p className="text-[10px] text-sky-100 leading-relaxed font-bold">
+              نسخه رسمی و ۱۰۰٪ امن تلگرام وب مستقیماً درون برنامه یکپارچه شد! از این پس می‌توانید چت‌ها، کانال‌های قفل شده یا فیلم‌های تلگرامی را جستجو کرده و با کپی کردن پیام، فوراً آنها را دانلود کنید.
             </p>
 
-            <div className="space-y-2.5">
-              <input
-                type="text"
-                value={telegramLink}
-                onChange={(e) => setTelegramLink(e.target.value)}
-                placeholder="https://t.me/parstech_media/1423"
-                className="w-full px-3 py-2 bg-white dark:bg-slate-900 border border-gray-200 dark:border-gray-800 rounded-xl text-xs font-bold outline-none focus:border-sky-500 transition-all font-mono"
-              />
-
-              <div className="space-y-1">
-                <label className="text-[10px] text-gray-500 dark:text-gray-400 font-extrabold block">حجم فایل تلگرام (پخش خودکار یا تخمین):</label>
-                <select
-                  value={telegramSizeOption}
-                  onChange={(e) => setTelegramSizeOption(e.target.value)}
-                  className="w-full px-3 py-1.5 bg-white dark:bg-slate-900 border border-gray-200 dark:border-gray-800 rounded-xl text-[11px] font-bold outline-none focus:border-sky-500 transition-all cursor-pointer"
-                >
-                  <option value="17">کلیپ کوتاه / فیلم نمونه (۱۷ مگابایت)</option>
-                  <option value="250">سریال کم‌حجم SD (۲۵۰ مگابایت)</option>
-                  <option value="450">سریال متوسط ۷۲۰p (۴۵۰ مگابایت)</option>
-                  <option value="950">سریال عالی ۱۰۸۰p (۹۵۰ مگابایت)</option>
-                  <option value="1300">فیلم سینمایی معمولی (۱.۳ گیگابایت)</option>
-                  <option value="2500">فیلم سینمایی کیفیت بالا (۲.۵ گیگابایت)</option>
-                  <option value="custom">تنظیم حجم دستی (مگابایت)</option>
-                </select>
-              </div>
-
-              {telegramSizeOption === 'custom' && (
-                <div className="flex items-center gap-2.5 animate-slideIn">
-                  <span className="text-[10px] text-gray-400 font-extrabold shrink-0">حجم دقیق (مگابایت):</span>
-                  <input
-                    type="number"
-                    min="1"
-                    value={telegramCustomSizeMb}
-                    onChange={(e) => setTelegramCustomSizeMb(Number(e.target.value))}
-                    className="w-full px-3 py-1.5 bg-white dark:bg-slate-900 border border-gray-200 dark:border-gray-800 rounded-xl text-xs font-bold outline-none font-mono"
-                  />
-                </div>
-              )}
-
-              <button
-                onClick={handleAddTelegramDownload}
-                className="w-full py-2.5 bg-sky-600 hover:bg-sky-700 active:scale-95 text-white text-xs font-black rounded-xl shadow-lg shadow-sky-600/10 transition-all text-center cursor-pointer"
-              >
-                تحلیل و اضافه به صف دانلود
-              </button>
-            </div>
-
-            <div className="pt-2 border-t border-sky-100/60 dark:border-sky-900/20 flex items-center justify-between text-[9px] text-gray-400 font-bold">
-              <span className="flex items-center gap-1">
-                <span className="w-2 h-2 rounded-full bg-emerald-500 inline-block animate-pulse"></span>
-                ربات تلگرام متصل است
-              </span>
-              <span>@parstech_dl_bot</span>
-            </div>
+            <button
+              onClick={() => {
+                setDownloadsViewTab('telegram_browser');
+                showToast('به میز کار رسمی تلگرام خوش آمدید! ✨', 'info');
+              }}
+              className="w-full py-2.5 bg-white text-sky-700 hover:bg-sky-50 text-[10.5px] font-black rounded-xl transition-all text-center cursor-pointer flex items-center justify-center gap-2 shadow-md shadow-sky-900/10"
+            >
+              <Send className="w-3.5 h-3.5" />
+              ورود به میز کار تلگرام وب (جدید)
+            </button>
           </div>
 
           {/* Download Speed Meter Graphic */}
@@ -1549,14 +1673,93 @@ export default function Downloads() {
 
                 <div className="space-y-2">
                   <label className="text-[11.5px] font-black text-gray-700 dark:text-gray-300 block">پوشه ذخیره‌سازی محلی:</label>
-                  <input
-                    type="text"
-                    required
-                    value={saveFolder}
-                    onChange={(e) => setSaveFolder(e.target.value)}
-                    placeholder="D:/Movies/Iranian"
-                    className="w-full px-3.5 py-2.5 bg-gray-50 dark:bg-slate-900 border border-gray-200 dark:border-gray-800 rounded-xl text-xs font-bold outline-none focus:border-indigo-500 transition-all font-mono"
-                  />
+                  <div className="flex gap-2">
+                    <input
+                      type="text"
+                      required
+                      value={saveFolder}
+                      onChange={(e) => setSaveFolder(e.target.value)}
+                      placeholder="D:/Movies/Iranian"
+                      className="flex-1 px-3.5 py-2.5 bg-gray-50 dark:bg-slate-900 border border-gray-200 dark:border-gray-800 rounded-xl text-xs font-bold outline-none focus:border-indigo-500 transition-all font-mono"
+                    />
+                    <button
+                      type="button"
+                      onClick={async () => {
+                        const path = await handleSelectFolder();
+                        if (path) setSaveFolder(path);
+                      }}
+                      className="px-3 bg-gray-100 hover:bg-gray-200 dark:bg-slate-800 dark:hover:bg-slate-700 text-gray-700 dark:text-gray-300 rounded-xl border border-gray-200 dark:border-gray-800 flex items-center justify-center cursor-pointer transition-all"
+                      title="انتخاب پوشه از سیستم"
+                    >
+                      <FolderOpen className="w-4 h-4" />
+                    </button>
+                  </div>
+                </div>
+              </div>
+
+              {/* Series auto-mapping fields */}
+              {mediaType === 'series' && (
+                <div className="p-4 rounded-xl border border-indigo-100 dark:border-indigo-950 bg-indigo-50/10 dark:bg-indigo-950/10 space-y-3 animate-slideIn">
+                  <span className="text-[11px] font-extrabold text-indigo-650 dark:text-indigo-400 block">شناسایی و انتساب خودکار به آرشیو سریال‌ها</span>
+                  
+                  <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+                    <div className="space-y-1">
+                      <label className="text-[10px] font-black text-gray-600 dark:text-gray-355 block">انتخاب سریال:</label>
+                      <select
+                        value={selectedSeriesId}
+                        onChange={(e) => setSelectedSeriesId(e.target.value)}
+                        className="w-full px-2.5 py-1.5 bg-white dark:bg-slate-900 border border-gray-200 dark:border-gray-800 rounded-lg text-xs font-bold"
+                      >
+                        <option value="none">سایر / نامشخص</option>
+                        {existingSeries.map(s => (
+                          <option key={s.id} value={s.id}>{s.titleFa || s.titleEn}</option>
+                        ))}
+                      </select>
+                    </div>
+
+                    <div className="space-y-1">
+                      <label className="text-[10px] font-black text-gray-600 dark:text-gray-355 block">شماره فصل:</label>
+                      <input
+                        type="number"
+                        min="1"
+                        value={selectedSeasonNum}
+                        onChange={(e) => setSelectedSeasonNum(Number(e.target.value))}
+                        className="w-full px-2.5 py-1.5 bg-white dark:bg-slate-900 border border-gray-200 dark:border-gray-800 rounded-lg text-xs font-bold font-mono"
+                      />
+                    </div>
+
+                    <div className="space-y-1">
+                      <label className="text-[10px] font-black text-gray-600 dark:text-gray-355 block">شماره قسمت:</label>
+                      <input
+                        type="number"
+                        min="1"
+                        value={selectedEpisodeNum}
+                        onChange={(e) => setSelectedEpisodeNum(Number(e.target.value))}
+                        className="w-full px-2.5 py-1.5 bg-white dark:bg-slate-900 border border-gray-200 dark:border-gray-800 rounded-lg text-xs font-bold font-mono"
+                      />
+                    </div>
+                  </div>
+                </div>
+              )}
+
+              {/* Subtitles Download check */}
+              <div className="p-3.5 rounded-xl border border-gray-150 dark:border-gray-800 flex items-center justify-between bg-gray-50/50 dark:bg-slate-900/30">
+                <div className="flex items-center gap-2">
+                  <button
+                    type="button"
+                    onClick={() => setDownloadSubtitle(!downloadSubtitle)}
+                    className="text-indigo-600 focus:outline-none cursor-pointer"
+                  >
+                    {downloadSubtitle ? (
+                      <CheckSquare className="w-5 h-5" />
+                    ) : (
+                      <Square className="w-5 h-5 text-gray-400" />
+                    )}
+                  </button>
+                  <div className="flex flex-col">
+                    <span className="text-xs font-black text-gray-800 dark:text-white">دانلود خودکار زیرنویس فارسی هماهنگ (.srt)</span>
+                    <span className="text-[10px] text-gray-400 font-bold">همزمان با دانلود فیلم/سریال، فایل زیرنویس آن به صف اضافه و متصل می‌شود.</span>
+                  </div>
                 </div>
               </div>
 
@@ -1765,13 +1968,26 @@ export default function Downloads() {
 
               <div className="space-y-1.5">
                 <label className="text-[11px] font-black text-gray-700 dark:text-gray-300 block">پوشه مقصد ذخیره‌سازی محلی:</label>
-                <input
-                  type="text"
-                  required
-                  value={editSaveFolder}
-                  onChange={(e) => setEditSaveFolder(e.target.value)}
-                  className="w-full px-3 py-2 bg-gray-50 dark:bg-slate-900 border border-gray-200 dark:border-gray-800 rounded-xl text-xs font-bold outline-none focus:border-blue-500 transition-all font-mono text-left"
-                />
+                <div className="flex gap-2">
+                  <input
+                    type="text"
+                    required
+                    value={editSaveFolder}
+                    onChange={(e) => setEditSaveFolder(e.target.value)}
+                    className="flex-1 px-3 py-2 bg-gray-50 dark:bg-slate-900 border border-gray-200 dark:border-gray-800 rounded-xl text-xs font-bold outline-none focus:border-blue-500 transition-all font-mono text-left"
+                  />
+                  <button
+                    type="button"
+                    onClick={async () => {
+                      const path = await handleSelectFolder();
+                      if (path) setEditSaveFolder(path);
+                    }}
+                    className="px-3 bg-gray-100 hover:bg-gray-200 dark:bg-slate-800 dark:hover:bg-slate-700 text-gray-700 dark:text-gray-300 rounded-xl border border-gray-200 dark:border-gray-800 flex items-center justify-center cursor-pointer transition-all"
+                    title="انتخاب پوشه از سیستم"
+                  >
+                    <FolderOpen className="w-4 h-4" />
+                  </button>
+                </div>
               </div>
 
               <div className="border border-gray-150 dark:border-gray-800 p-4.5 rounded-xl space-y-3">
@@ -1897,28 +2113,88 @@ export default function Downloads() {
                     </div>
                   </div>
 
-                  <div className="bg-slate-50 dark:bg-slate-900 p-3.5 rounded-xl border border-gray-150 dark:border-gray-850 grid grid-cols-1 sm:grid-cols-2 gap-4">
-                    <div className="space-y-1">
-                      <span className="text-[10px] text-gray-400 font-extrabold">دسته‌بندی رسانه برای تمام موارد انتخابی:</span>
-                      <select
-                        value={grabberMediaType}
-                        onChange={(e) => setGrabberMediaType(e.target.value as any)}
-                        className="w-full px-3 py-1.5 bg-white dark:bg-slate-800 border border-gray-200 dark:border-gray-750 rounded-lg text-xs font-bold"
-                      >
-                        <option value="movie">فیلم سینمایی (Movie)</option>
-                        <option value="series">سریال تلویزیونی (Series)</option>
-                        <option value="other">سایر فایل‌ها</option>
-                      </select>
+                  <div className="bg-slate-50 dark:bg-slate-900 p-3.5 rounded-xl border border-gray-150 dark:border-gray-850 space-y-3">
+                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                      <div className="space-y-1">
+                        <span className="text-[10px] text-gray-400 font-extrabold">دسته‌بندی رسانه برای تمام موارد انتخابی:</span>
+                        <select
+                          value={grabberMediaType}
+                          onChange={(e) => setGrabberMediaType(e.target.value as any)}
+                          className="w-full px-3 py-1.5 bg-white dark:bg-slate-800 border border-gray-200 dark:border-gray-750 rounded-lg text-xs font-bold"
+                        >
+                          <option value="movie">فیلم سینمایی (Movie)</option>
+                          <option value="series">سریال تلویزیونی (Series)</option>
+                          <option value="other">سایر فایل‌ها</option>
+                        </select>
+                      </div>
+                      <div className="space-y-1">
+                        <span className="text-[10px] text-gray-400 font-extrabold">پوشه ذخیره‌سازی مقصد:</span>
+                        <div className="flex gap-2">
+                          <input
+                            type="text"
+                            value={grabberSaveFolder}
+                            onChange={(e) => setGrabberSaveFolder(e.target.value)}
+                            className="flex-1 px-3 py-1.5 bg-white dark:bg-slate-800 border border-gray-200 dark:border-gray-750 rounded-lg text-xs font-bold font-mono text-left"
+                          />
+                          <button
+                            type="button"
+                            onClick={async () => {
+                              const path = await handleSelectFolder();
+                              if (path) setGrabberSaveFolder(path);
+                            }}
+                            className="px-2.5 bg-gray-100 hover:bg-gray-200 dark:bg-slate-800 dark:hover:bg-slate-700 text-gray-700 dark:text-gray-300 rounded-lg border border-gray-200 dark:border-gray-750 flex items-center justify-center cursor-pointer transition-all"
+                            title="انتخاب پوشه از سیستم"
+                          >
+                            <FolderOpen className="w-3.5 h-3.5" />
+                          </button>
+                        </div>
+                      </div>
                     </div>
-                    <div className="space-y-1">
-                      <span className="text-[10px] text-gray-400 font-extrabold">پوشه ذخیره‌سازی مقصد:</span>
-                      <input
-                        type="text"
-                        value={grabberSaveFolder}
-                        onChange={(e) => setGrabberSaveFolder(e.target.value)}
-                        className="w-full px-3 py-1.5 bg-white dark:bg-slate-800 border border-gray-200 dark:border-gray-750 rounded-lg text-xs font-bold font-mono text-left"
-                      />
-                    </div>
+
+                    {/* Series configuration inside grabber */}
+                    {grabberMediaType === 'series' && (
+                      <div className="p-3 bg-indigo-50/20 dark:bg-indigo-950/20 border border-indigo-100 dark:border-indigo-950 rounded-xl grid grid-cols-1 sm:grid-cols-3 gap-3 animate-slideIn">
+                        <div className="space-y-1">
+                          <span className="text-[10px] text-indigo-650 dark:text-indigo-400 font-extrabold">انتساب به سریال:</span>
+                          <select
+                            value={grabberSelectedSeriesId}
+                            onChange={(e) => setGrabberSelectedSeriesId(e.target.value)}
+                            className="w-full px-2.5 py-1.5 bg-white dark:bg-slate-800 border border-gray-200 dark:border-gray-700 rounded-lg text-xs font-bold"
+                          >
+                            <option value="none">سایر / نامشخص (تلاش برای تشخیص از نام)</option>
+                            {existingSeries.map(s => (
+                              <option key={s.id} value={s.id}>{s.titleFa || s.titleEn}</option>
+                            ))}
+                          </select>
+                        </div>
+
+                        <div className="space-y-1">
+                          <span className="text-[10px] text-indigo-650 dark:text-indigo-400 font-extrabold">شماره فصل:</span>
+                          <input
+                            type="number"
+                            min="1"
+                            value={grabberSeasonNum}
+                            onChange={(e) => setGrabberSeasonNum(Number(e.target.value))}
+                            className="w-full px-2.5 py-1 bg-white dark:bg-slate-800 border border-gray-200 dark:border-gray-700 rounded-lg text-xs font-bold font-mono"
+                          />
+                        </div>
+
+                        <div className="space-y-1 flex items-end">
+                          <button
+                            type="button"
+                            onClick={() => setGrabberDownloadSubtitles(!grabberDownloadSubtitles)}
+                            className="flex items-center gap-1.5 py-1 text-xs text-gray-700 dark:text-gray-300 font-bold focus:outline-none cursor-pointer"
+                          >
+                            {grabberDownloadSubtitles ? (
+                              <CheckSquare className="w-4.5 h-4.5 text-indigo-600 shrink-0" />
+                            ) : (
+                              <Square className="w-4.5 h-4.5 text-gray-400 shrink-0" />
+                            )}
+                            دانلود زیرنویس فارسی (.srt)
+                          </button>
+                        </div>
+                      </div>
+                    )}
                   </div>
 
                   <div className="border border-gray-150 dark:border-gray-800 rounded-xl overflow-hidden max-h-60 overflow-y-auto bg-gray-50/40 dark:bg-slate-900/20">

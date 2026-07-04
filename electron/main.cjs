@@ -768,9 +768,34 @@ ipcMain.handle('run-sql', async (event, sql, params = []) => {
 
 ipcMain.handle('exists-file', async (event, filepath) => {
   try {
-    return { success: true, exists: fs.existsSync(filepath) };
+    const exists = fs.existsSync(filepath);
+    let size = 0;
+    if (exists) {
+      const stat = fs.statSync(filepath);
+      size = stat.size;
+    }
+    return { success: true, exists, size };
   } catch (err) {
     return { success: false, exists: false, error: err.message };
+  }
+});
+
+ipcMain.handle('rename-file', async (event, oldPath, newPath) => {
+  try {
+    if (!oldPath || !newPath) {
+      return { success: false, error: 'مسیر مبدا یا مقصد مشخص نیست.' };
+    }
+    if (!fs.existsSync(oldPath)) {
+      return { success: false, error: 'فایل مبدا وجود ندارد.' };
+    }
+    const destDir = path.dirname(newPath);
+    if (!fs.existsSync(destDir)) {
+      fs.mkdirSync(destDir, { recursive: true });
+    }
+    fs.renameSync(oldPath, newPath);
+    return { success: true };
+  } catch (err) {
+    return { success: false, error: err.message };
   }
 });
 
@@ -839,7 +864,7 @@ ipcMain.handle('scan-media-directory', async (event, dirpath) => {
     }
     
     const results = [];
-    const supportedExts = new Set(['.mkv', '.mp4', '.avi', '.mov', '.wmv', '.flv', '.mpeg', '.mpg', '.m4v', '.ts']);
+    const supportedExts = new Set(['.mkv', '.mp4', '.avi', '.mov', '.wmv', '.flv', '.mpeg', '.mpg', '.m4v', '.ts', '.3gp', '.3gpp']);
     
     function scanDir(currentPath) {
       const entries = fs.readdirSync(currentPath);
@@ -2403,6 +2428,34 @@ ipcMain.handle('download-lan-file', async (event, url, destPath) => {
   });
 });
 
+// Active copy streams map for cancellation support
+const activeCopyStreams = new Map();
+
+// IPC handle for canceling an ongoing file copy
+ipcMain.handle('cancel-copy', async (event, id) => {
+  const active = activeCopyStreams.get(id);
+  if (active) {
+    try {
+      active.readStream.destroy();
+      active.writeStream.destroy();
+      activeCopyStreams.delete(id);
+      
+      // Allow some milliseconds for the file handles to release
+      setTimeout(() => {
+        if (fs.existsSync(active.destPath)) {
+          try { fs.unlinkSync(active.destPath); } catch (ex) {}
+        }
+      }, 150);
+      
+      console.log(`Successfully canceled copying for ID: ${id}`);
+      return { success: true };
+    } catch (err) {
+      return { success: false, error: err.message };
+    }
+  }
+  return { success: false, error: 'عملیات کپی فعالی برای این شناسه یافت نشد.' };
+});
+
 // IPC handle for Copying Media File to USB Flash/HDD Drive with real progress
 ipcMain.handle('copy-file-to-usb', async (event, { sourcePath, destDir, id, customRelativePath }) => {
   return new Promise((resolve) => {
@@ -2442,6 +2495,9 @@ ipcMain.handle('copy-file-to-usb', async (event, { sourcePath, destDir, id, cust
       const readStream = fs.createReadStream(sourcePath);
       const writeStream = fs.createWriteStream(destPath);
 
+      // Register active streams for cancel support
+      activeCopyStreams.set(id, { readStream, writeStream, destPath });
+
       const totalBytes = stat.size;
       let bytesCopied = 0;
       let startTime = Date.now();
@@ -2477,6 +2533,7 @@ ipcMain.handle('copy-file-to-usb', async (event, { sourcePath, destDir, id, cust
 
       writeStream.on('finish', () => {
         writeStream.close();
+        activeCopyStreams.delete(id);
         if (mainWindow && !mainWindow.isDestroyed()) {
           mainWindow.webContents.send('copy-progress', {
             id,
@@ -2492,6 +2549,7 @@ ipcMain.handle('copy-file-to-usb', async (event, { sourcePath, destDir, id, cust
 
       readStream.on('error', (err) => {
         writeStream.close();
+        activeCopyStreams.delete(id);
         if (fs.existsSync(destPath)) {
           try { fs.unlinkSync(destPath); } catch (ex) {}
         }
@@ -2501,6 +2559,7 @@ ipcMain.handle('copy-file-to-usb', async (event, { sourcePath, destDir, id, cust
       writeStream.on('error', (err) => {
         readStream.destroy();
         writeStream.close();
+        activeCopyStreams.delete(id);
         if (fs.existsSync(destPath)) {
           try { fs.unlinkSync(destPath); } catch (ex) {}
         }

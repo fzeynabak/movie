@@ -192,13 +192,15 @@ declare global {
       isSqliteAvailable: () => Promise<boolean>;
       fetchUrlData?: (url: string, options?: { timeout?: number }) => Promise<{ success: boolean; data?: any; error?: string }>;
       savePosterLocal?: (imageUrl: string, destFolder: string, filename: string) => Promise<{ success: boolean; savedPath?: string; error?: string }>;
-      existsFile?: (filepath: string) => Promise<{ success: boolean; exists: boolean; error?: string }>;
+      existsFile?: (filepath: string) => Promise<{ success: boolean; exists: boolean; size?: number; error?: string }>;
+      renameFile?: (oldPath: string, newPath: string) => Promise<{ success: boolean; error?: string }>;
       resolveVideoPath?: (basePathWithoutExt: string) => Promise<{ success: boolean; resolvedPath: string; ext: string; error?: string }>;
       scanSeriesDirectory?: (dirpath: string) => Promise<{ success: boolean; files?: Array<{ name: string; path: string; ext: string; size: number }>; error?: string }>;
       scanMediaDirectory?: (dirpath: string) => Promise<{ success: boolean; files?: Array<{ filename: string; fullPath: string; extension: string; folder: string; size: number; modifiedDate: string }>; error?: string }>;
       getLocalIps?: () => Promise<string[]>;
       downloadLanFile?: (url: string, destPath: string) => Promise<{ success: boolean; error?: string }>;
       copyFileToUsb?: (sourcePath: string, destDir: string, id: string, customRelativePath?: string) => Promise<{ success: boolean; destPath?: string; error?: string }>;
+      cancelCopy?: (id: string) => Promise<{ success: boolean; error?: string }>;
       saveInvoiceImage?: (destDir: string, base64Data: string, filename: string) => Promise<{ success: boolean; destPath?: string; error?: string }>;
       findMatchingSubtitles?: (videoPath: string) => Promise<{ success: boolean; subtitles?: string[]; error?: string }>;
       readTextFile?: (filepath: string) => Promise<{ success: boolean; content?: string; error?: string }>;

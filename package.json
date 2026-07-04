@@ -18,10 +18,11 @@
     "package": "npm run build && electron-builder --win"
   },
   "build": {
-    "appId": "com.movieapp.app",
-    "productName": "MovieParsTech",
+    "appId": "com.parstech.media",
+    "productName": "ParsTech Media Center",
     "asar": true,
     "asarUnpack": [
+      "**/*.node",
       "**/node_modules/sqlite3/**/*",
       "**/node_modules/better-sqlite3/**/*"
     ],
@@ -34,9 +35,10 @@
     "directories": {
       "output": "release"
     },
-    "icon": "assets/icon.png",
     "win": {
-      "target": "nsis",
+      "target": [
+        "nsis"
+      ],
       "icon": "assets/icon.ico"
     },
     "nsis": {
