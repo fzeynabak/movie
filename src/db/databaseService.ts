@@ -31,6 +31,8 @@ const DEFAULT_SETTINGS: AppSettings = {
   shopAddress: 'تهران، خیابان ولیعصر، تقاطع میرداماد، خدمات رسانه پارس تک',
   shopPhone: '۰۹۳۸۰۰۷۲۰۱۹',
   shopPhoneSecondary: '۰۲۱-۸۸۸۸۸۸۸۸',
+  customCategories: ['ایرانی', 'خارجی', 'انیمیشن', 'کره‌ای', 'هندی', 'متفرقه'],
+  customQualities: ['1080p BluRay', '1080p WEB-DL', '720p BluRay', '720p WEB-DL', '4K UltraHD', '1080p x265 10bit', '720p x265 10bit'],
   videoPlayerMode: 'internal',
   saveInvoiceToUsbEnabled: true
 };
@@ -1318,6 +1320,28 @@ class DatabaseService {
 
   public clearLogs() {
     localStorage.removeItem('mediacenter_db_logs');
+  }
+
+  public async clearAllDatabase() {
+    if (typeof window !== 'undefined' && window.electronAPI && window.electronAPI.runSql) {
+      await window.electronAPI.runSql('DELETE FROM users').catch(() => {});
+      await window.electronAPI.runSql('DELETE FROM movies').catch(() => {});
+      await window.electronAPI.runSql('DELETE FROM series').catch(() => {});
+      await window.electronAPI.runSql('DELETE FROM sales').catch(() => {});
+      await window.electronAPI.runSql('DELETE FROM songs').catch(() => {});
+      await window.electronAPI.runSql('DELETE FROM playlists').catch(() => {});
+      await window.electronAPI.runSql('DELETE FROM settings').catch(() => {});
+      await window.electronAPI.runSql('DELETE FROM customers').catch(() => {});
+    }
+    if (typeof window !== 'undefined') {
+      localStorage.clear();
+    }
+    this.moviesCache = [];
+    this.seriesCache = [];
+    this.salesCache = [];
+    this.songsCache = [];
+    this.playlistsCache = [];
+    this.updateSettings(DEFAULT_SETTINGS);
   }
 
   private safeParseJson(str: any, defaultVal: any) {

@@ -57,6 +57,8 @@ export class MediaScanner {
     const rawFiles = await this.scanDirectory(directoryPath);
     const results: ScannedMediaItem[] = [];
 
+    // Skip TMDb requests during the scanning phase to ensure scanning 40+ items is incredibly fast and local.
+    // TMDb metadata matching and image downloading are deferred entirely to the checked item's import phase.
     for (const file of rawFiles) {
       try {
         const parsed = FilenameParser.parse(file.filename);
@@ -67,7 +69,7 @@ export class MediaScanner {
           matchStatus: 'unknown'
         });
       } catch (err) {
-        console.error(`Error scanning and parsing file "${file.filename}":`, err);
+        console.error(`Error scanning file "${file.filename}":`, err);
       }
     }
 

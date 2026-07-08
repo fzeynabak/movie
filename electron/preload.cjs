@@ -24,6 +24,8 @@ contextBridge.exposeInMainWorld('electronAPI', {
   quitApp: () => ipcRenderer.invoke('quit-app'),
   existsFile: (filepath) => ipcRenderer.invoke('exists-file', filepath),
   renameFile: (oldPath, newPath) => ipcRenderer.invoke('rename-file', oldPath, newPath),
+  moveFilePhysical: (oldPath, newPath) => ipcRenderer.invoke('move-file-physical', oldPath, newPath),
+  getDiskSpace: (dirPath) => ipcRenderer.invoke('get-disk-space', dirPath),
   resolveVideoPath: (basePathWithoutExt) => ipcRenderer.invoke('resolve-video-path', basePathWithoutExt),
   scanSeriesDirectory: (dirpath) => ipcRenderer.invoke('scan-series-directory', dirpath),
   scanMediaDirectory: (dirpath) => ipcRenderer.invoke('scan-media-directory', dirpath),

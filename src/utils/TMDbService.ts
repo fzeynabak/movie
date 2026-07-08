@@ -65,11 +65,20 @@ export class TMDbService {
       url.searchParams.set('api_key', apiKey);
     }
 
-    const res = await fetch(url.toString(), { headers });
-    if (!res.ok) {
-      throw new Error(`TMDb HTTP error ${res.status}`);
+    const controller = new AbortController();
+    const timeoutId = setTimeout(() => controller.abort(), 3000);
+
+    try {
+      const res = await fetch(url.toString(), { headers, signal: controller.signal });
+      clearTimeout(timeoutId);
+      if (!res.ok) {
+        throw new Error(`TMDb HTTP error ${res.status}`);
+      }
+      return await res.json();
+    } catch (fetchErr) {
+      clearTimeout(timeoutId);
+      throw fetchErr;
     }
-    return await res.json();
   }
 
   /**
@@ -329,8 +338,8 @@ export class TMDbService {
         : getVal(data.name, enData?.name || data.original_name);
 
       const originalTitle = mediaType === 'movie'
-        ? (data.original_title || enData?.original_title || '')
-        : (data.original_name || enData?.original_name || '');
+        ? (enData?.title || (mainLang === 'en-US' ? data.title : '') || data.original_title || '')
+        : (enData?.name || (mainLang === 'en-US' ? data.name : '') || data.original_name || '');
 
       const overview = getVal(data.overview, enData?.overview || '');
       const releaseDate = mediaType === 'movie'

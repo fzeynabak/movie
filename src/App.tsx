@@ -245,6 +245,10 @@ export default function App() {
     localStorage.setItem('mediacenter_active_drive_path', drivePath);
   };
 
+  const handleUpdateDriveCapacity = (capacity: number) => {
+    setSessions(prev => prev.map(s => s.id === activeSession.id ? { ...s, selectedDriveCapacityGB: capacity } : s));
+  };
+
   // Cart operations helpers
   const handleAddToCart = (item: Omit<CartItem, 'id'>) => {
     const newItem: CartItem = {
@@ -712,6 +716,7 @@ export default function App() {
             onAddSession={handleAddSession}
             onCloseSession={handleCloseSession}
             onUpdateDrivePath={handleUpdateDrivePath}
+            onUpdateDriveCapacity={handleUpdateDriveCapacity}
           />
 
           {!sqliteActive && (

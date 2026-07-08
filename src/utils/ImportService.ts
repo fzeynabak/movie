@@ -21,25 +21,80 @@ export class ImportService {
   public static async importItems(
     selectedItems: ScannedMediaItem[],
     defaultCategory: string = 'خارجی'
-  ): Promise<{ successCount: number; failedCount: number }> {
+  ): Promise<{ successCount: number; failedCount: number; moviesCount: number; seriesCount: number }> {
     let successCount = 0;
     let failedCount = 0;
+    let moviesCount = 0;
+    let seriesCount = 0;
 
     const settings = dbService.getSettings();
     const defaultMoviePrice = settings?.defaultMoviePrice || 2000;
     const defaultSeriesPrice = settings?.defaultSeriesPrice || 1500;
 
-    // Cache to avoid searching TMDb and downloading posters multiple times for the same series folder
+    // Cache to avoid searching TMDb and downloading posters multiple times for the same series folder or name
     const seriesFolderCache = new Map<string, any>();
+    const folderPosterCache = new Map<string, { posterPath: string; backdropPath: string; gallery: string[] }>();
 
     for (const item of selectedItems) {
       try {
-        // If series and folder already processed, reuse the downloaded tmdb data
-        if (item.parsed.isSeries && seriesFolderCache.has(item.file.folder)) {
-          const cachedTmdb = seriesFolderCache.get(item.file.folder);
-          if (cachedTmdb) {
-            item.tmdb = JSON.parse(JSON.stringify(cachedTmdb));
+        const isWindows = item.file.folder.includes('\\');
+        const picFolder = item.file.folder + (isWindows ? '\\pic' : '/pic');
+        const fKey = picFolder.toLowerCase().trim();
+
+        // If series, try to reconstruct dummy TMDb match from existing series in DB first to be fully offline and avoid downloads
+        if (item.parsed.isSeries && !item.tmdb) {
+          const parsedSeries = item.parsed as ParsedSeries;
+          const seriesNameKey = parsedSeries.seriesName.trim();
+          const existingSeriesList = dbService.getSeries();
+          const dbSeriesItem = existingSeriesList.find(s => 
+            s.titleFa.toLowerCase().trim() === seriesNameKey.toLowerCase() ||
+            s.titleEn.toLowerCase().trim() === seriesNameKey.toLowerCase()
+          );
+
+          if (dbSeriesItem) {
+            item.tmdb = {
+              id: dbSeriesItem.officialSite ? parseInt(dbSeriesItem.officialSite.split('/').pop() || '0', 10) : 0,
+              title: dbSeriesItem.titleFa,
+              originalTitle: dbSeriesItem.titleEn,
+              posterPath: dbSeriesItem.poster,
+              backdropPath: dbSeriesItem.poster,
+              overview: dbSeriesItem.summary,
+              releaseDate: dbSeriesItem.year,
+              rating: parseFloat(dbSeriesItem.imdbRating) || 0.0,
+              genres: dbSeriesItem.genres || [],
+              cast: dbSeriesItem.actors ? dbSeriesItem.actors.split(', ') : [],
+              director: dbSeriesItem.director ? dbSeriesItem.director.split(', ') : [],
+              runtime: parseInt(dbSeriesItem.episodeDuration) || 45,
+              countries: [dbSeriesItem.country || ''],
+              gallery: dbSeriesItem.gallery || [],
+              voteCount: 0,
+              productionCompanies: [],
+              mediaType: 'tv'
+            };
             item.matchStatus = 'matched';
+          }
+        }
+
+        // If series, we can also check the in-memory cache keyed by series name
+        if (item.parsed.isSeries) {
+          const parsedSeries = item.parsed as ParsedSeries;
+          const sKey = parsedSeries.seriesName.toLowerCase().trim();
+          if (seriesFolderCache.has(sKey)) {
+            const cachedTmdb = seriesFolderCache.get(sKey);
+            if (cachedTmdb) {
+              item.tmdb = JSON.parse(JSON.stringify(cachedTmdb));
+              item.matchStatus = 'matched';
+            }
+          }
+        }
+
+        // Apply folder poster cache if available
+        if (folderPosterCache.has(fKey)) {
+          const cachedPaths = folderPosterCache.get(fKey);
+          if (cachedPaths && item.tmdb) {
+            item.tmdb.posterPath = cachedPaths.posterPath;
+            item.tmdb.backdropPath = cachedPaths.backdropPath;
+            item.tmdb.gallery = cachedPaths.gallery;
           }
         }
 
@@ -55,9 +110,6 @@ export class ImportService {
 
               // Download posters and backdrop locally inside film directory under /pic/
               if (window.electronAPI && window.electronAPI.savePosterLocal) {
-                const isWindows = item.file.folder.includes('\\');
-                const picFolder = item.file.folder + (isWindows ? '\\pic' : '/pic');
-
                 // A. Save poster
                 if (item.tmdb.posterPath) {
                   const posterRes = await window.electronAPI.savePosterLocal(item.tmdb.posterPath, picFolder, 'poster');
@@ -86,11 +138,20 @@ export class ImportService {
                   }
                   item.tmdb.gallery = localGallery;
                 }
+
+                // Store in folderPosterCache
+                folderPosterCache.set(fKey, {
+                  posterPath: item.tmdb.posterPath,
+                  backdropPath: item.tmdb.backdropPath,
+                  gallery: item.tmdb.gallery
+                });
               }
 
-              // Store in cache for subsequent episodes
+              // Store in cache for subsequent episodes using series name as key
               if (item.parsed.isSeries) {
-                seriesFolderCache.set(item.file.folder, JSON.parse(JSON.stringify(item.tmdb)));
+                const parsedSeries = item.parsed as ParsedSeries;
+                const sKey = parsedSeries.seriesName.toLowerCase().trim();
+                seriesFolderCache.set(sKey, JSON.parse(JSON.stringify(item.tmdb)));
               }
             }
           } catch (tmdbErr) {
@@ -98,8 +159,67 @@ export class ImportService {
           }
         }
 
+        // If tmdb has remote paths (e.g. from batch assigning), download them locally and cache them!
+        if (item.tmdb) {
+          const isRemotePoster = item.tmdb.posterPath && (item.tmdb.posterPath.startsWith('http') || (item.tmdb.posterPath.startsWith('/') && !item.tmdb.posterPath.includes('/pic/') && !item.tmdb.posterPath.includes('\\pic\\')));
+          const isRemoteBackdrop = item.tmdb.backdropPath && (item.tmdb.backdropPath.startsWith('http') || (item.tmdb.backdropPath.startsWith('/') && !item.tmdb.backdropPath.includes('/pic/') && !item.tmdb.backdropPath.includes('\\pic\\')));
+          
+          if ((isRemotePoster || isRemoteBackdrop) && window.electronAPI && window.electronAPI.savePosterLocal) {
+            try {
+              if (isRemotePoster && item.tmdb.posterPath) {
+                const posterRes = await window.electronAPI.savePosterLocal(item.tmdb.posterPath, picFolder, 'poster');
+                if (posterRes && posterRes.success) {
+                  item.tmdb.posterPath = posterRes.savedPath;
+                }
+              }
+
+              if (isRemoteBackdrop && item.tmdb.backdropPath) {
+                const backdropRes = await window.electronAPI.savePosterLocal(item.tmdb.backdropPath, picFolder, 'backdrop');
+                if (backdropRes && backdropRes.success) {
+                  item.tmdb.backdropPath = backdropRes.savedPath;
+                }
+              }
+
+              if (item.tmdb.gallery && item.tmdb.gallery.length > 0) {
+                const localGallery: string[] = [];
+                for (let i = 0; i < Math.min(item.tmdb.gallery.length, 3); i++) {
+                  const imgUrl = item.tmdb.gallery[i];
+                  if (imgUrl.startsWith('http') || (imgUrl.startsWith('/') && !imgUrl.includes('/pic/') && !imgUrl.includes('\\pic\\'))) {
+                    const gallRes = await window.electronAPI.savePosterLocal(imgUrl, picFolder, `gallery_${i + 1}`);
+                    if (gallRes && gallRes.success) {
+                      localGallery.push(gallRes.savedPath);
+                    } else {
+                      localGallery.push(imgUrl);
+                    }
+                  } else {
+                    localGallery.push(imgUrl);
+                  }
+                }
+                item.tmdb.gallery = localGallery;
+              }
+
+              // Store in folderPosterCache
+              folderPosterCache.set(fKey, {
+                posterPath: item.tmdb.posterPath,
+                backdropPath: item.tmdb.backdropPath,
+                gallery: item.tmdb.gallery
+              });
+
+              // Store in cache for subsequent episodes using series name as key
+              if (item.parsed.isSeries) {
+                const parsedSeries = item.parsed as ParsedSeries;
+                const sKey = parsedSeries.seriesName.toLowerCase().trim();
+                seriesFolderCache.set(sKey, JSON.parse(JSON.stringify(item.tmdb)));
+              }
+            } catch (err) {
+              console.error('Error downloading local poster for pre-assigned tmdb:', err);
+            }
+          }
+        }
+
         if (item.parsed.isSeries) {
           // --- TV SERIES IMPORT ---
+          seriesCount++;
           const parsedSeries = item.parsed as ParsedSeries;
           const seasonNumStr = parsedSeries.season || '1';
           const seasonNum = parseInt(seasonNumStr, 10) || 1;
@@ -204,13 +324,13 @@ export class ImportService {
               titleFa,
               titleEn,
               year: item.tmdb?.releaseDate ? item.tmdb.releaseDate.substring(0, 4) : (parsedSeries.year || new Date().getFullYear().toString()),
-              director: item.tmdb?.director.join(', ') || 'نامشخص',
+              director: (item.tmdb?.director && Array.isArray(item.tmdb.director)) ? item.tmdb.director.join(', ') : 'نامشخص',
               writer: 'نامشخص',
-              actors: item.tmdb?.cast.join(', ') || 'نامشخص',
+              actors: (item.tmdb?.cast && Array.isArray(item.tmdb.cast)) ? item.tmdb.cast.join(', ') : 'نامشخص',
               episodeDuration: item.tmdb?.runtime ? `${item.tmdb.runtime} دقیقه` : '۴۵ دقیقه',
-              country: item.tmdb?.countries.join(', ') || 'خارجی',
+              country: (item.tmdb?.countries && Array.isArray(item.tmdb.countries)) ? item.tmdb.countries.join(', ') : 'خارجی',
               language: defaultCategory.includes('ایرانی') ? 'فارسی' : 'زبان اصلی (زیرنویس فارسی)',
-              imdbRating: item.tmdb?.rating ? item.tmdb.rating.toFixed(1) : '0.0',
+              imdbRating: typeof item.tmdb?.rating === 'number' ? item.tmdb.rating.toFixed(1) : '0.0',
               quality: parsedSeries.resolution || '1080p',
               subtitle: 'زیرنویس چسبیده دارد',
               genres: item.tmdb?.genres || [],
@@ -257,13 +377,13 @@ export class ImportService {
             titleFa,
             titleEn,
             year: item.tmdb?.releaseDate ? item.tmdb.releaseDate.substring(0, 4) : (parsedMovie.year || new Date().getFullYear().toString()),
-            director: item.tmdb?.director.join(', ') || 'نامشخص',
+            director: (item.tmdb?.director && Array.isArray(item.tmdb.director)) ? item.tmdb.director.join(', ') : 'نامشخص',
             writer: 'نامشخص',
-            actors: item.tmdb?.cast.join(', ') || 'نامشخص',
+            actors: (item.tmdb?.cast && Array.isArray(item.tmdb.cast)) ? item.tmdb.cast.join(', ') : 'نامشخص',
             duration: item.tmdb?.runtime ? `${item.tmdb.runtime} دقیقه` : '۱۲۰ دقیقه',
-            country: item.tmdb?.countries.join(', ') || 'خارجی',
+            country: (item.tmdb?.countries && Array.isArray(item.tmdb.countries)) ? item.tmdb.countries.join(', ') : 'خارجی',
             language: defaultCategory.includes('ایرانی') ? 'فارسی' : 'زبان اصلی (زیرنویس فارسی)',
-            imdbRating: item.tmdb?.rating ? item.tmdb.rating.toFixed(1) : '0.0',
+            imdbRating: typeof item.tmdb?.rating === 'number' ? item.tmdb.rating.toFixed(1) : '0.0',
             quality: parsedMovie.resolution || '1080p',
             subtitle: 'زیرنویس چسبیده دارد',
             genres: item.tmdb?.genres || [],
@@ -279,6 +399,7 @@ export class ImportService {
           };
 
           dbService.addMovie(newMovieItem);
+          moviesCount++;
           console.log(`Imported movie: ${titleFa}`);
         }
         successCount++;
@@ -288,6 +409,6 @@ export class ImportService {
       }
     }
 
-    return { successCount, failedCount };
+    return { successCount, failedCount, moviesCount, seriesCount };
   }
 }

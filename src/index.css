@@ -274,3 +274,23 @@ button.text-\[9px\].font-extrabold.text-\[\#38bdf8\].bg-sky-600.hover\:bg-sky-55
   padding: 0.75rem 1rem !important;
   margin-top: 50px !important; /* to stay safely below frameless header */
 }
+
+/* Custom horizontal thin scrollbar for tabs navigation */
+.scrollbar-thin-x {
+  scrollbar-width: thin;
+  -webkit-overflow-scrolling: touch;
+}
+.scrollbar-thin-x::-webkit-scrollbar {
+  height: 5px;
+}
+.scrollbar-thin-x::-webkit-scrollbar-track {
+  background: transparent;
+}
+.scrollbar-thin-x::-webkit-scrollbar-thumb {
+  background: rgba(148, 163, 184, 0.3);
+  border-radius: 9999px;
+}
+.scrollbar-thin-x::-webkit-scrollbar-thumb:hover {
+  background: rgba(148, 163, 184, 0.55);
+}
+

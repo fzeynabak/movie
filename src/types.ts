@@ -106,6 +106,7 @@ export interface CustomerSession {
   customerName: string; // customer name or contact info
   cart: CartItem[]; // customer's specific active shopping cart
   selectedDrivePath?: string; // USB drive path for this customer
+  selectedDriveCapacityGB?: number; // USB drive capacity in GB for space warning
 }
 
 export interface Sale {
@@ -194,66 +195,33 @@ declare global {
       savePosterLocal?: (imageUrl: string, destFolder: string, filename: string) => Promise<{ success: boolean; savedPath?: string; error?: string }>;
       existsFile?: (filepath: string) => Promise<{ success: boolean; exists: boolean; size?: number; error?: string }>;
       renameFile?: (oldPath: string, newPath: string) => Promise<{ success: boolean; error?: string }>;
+      moveFilePhysical?: (oldPath: string, newPath: string) => Promise<{ success: boolean; error?: string }>;
+      getDiskSpace?: (dirPath: string) => Promise<{ success: boolean; totalBytes?: number; freeBytes?: number; usedBytes?: number; error?: string }>;
       resolveVideoPath?: (basePathWithoutExt: string) => Promise<{ success: boolean; resolvedPath: string; ext: string; error?: string }>;
       scanSeriesDirectory?: (dirpath: string) => Promise<{ success: boolean; files?: Array<{ name: string; path: string; ext: string; size: number }>; error?: string }>;
       scanMediaDirectory?: (dirpath: string) => Promise<{ success: boolean; files?: Array<{ filename: string; fullPath: string; extension: string; folder: string; size: number; modifiedDate: string }>; error?: string }>;
       getLocalIps?: () => Promise<string[]>;
       downloadLanFile?: (url: string, destPath: string) => Promise<{ success: boolean; error?: string }>;
-      copyFileToUsb?: (sourcePath: string, destDir: string, id: string, customRelativePath?: string) => Promise<{ success: boolean; destPath?: string; error?: string }>;
-      cancelCopy?: (id: string) => Promise<{ success: boolean; error?: string }>;
-      saveInvoiceImage?: (destDir: string, base64Data: string, filename: string) => Promise<{ success: boolean; destPath?: string; error?: string }>;
+      copyFileToUsb?: (sourcePath: string, destDir: string, id: string, targetFileName?: string) => Promise<{ success: boolean; destPath?: string; error?: string }>;
+      saveBase64File?: (base64Data: string, destPath: string) => Promise<{ success: boolean; destPath?: string; error?: string }>;
+      readClipboardHTML?: () => Promise<{ success: boolean; html?: string; text?: string; error?: string }>;
+      openTelegram?: () => Promise<{ success: boolean; fallback?: boolean; error?: string }>;
+      downloadInternetFile?: (id: string, url: string, destPath: string) => Promise<{ success: boolean; destPath?: string; error?: string }>;
+      cancelDownloadFile?: (id: string) => Promise<{ success: boolean; error?: string }>;
       findMatchingSubtitles?: (videoPath: string) => Promise<{ success: boolean; subtitles?: string[]; error?: string }>;
       readTextFile?: (filepath: string) => Promise<{ success: boolean; content?: string; error?: string }>;
       exportSqliteDb?: (destPath: string) => Promise<{ success: boolean; error?: string }>;
       importSqliteDb?: (srcPath: string) => Promise<{ success: boolean; error?: string }>;
-      getInventoryHistory?: () => Promise<any[]>;
-      getPersons?: () => Promise<any[]>;
-      getInvoices?: () => Promise<any[]>;
-      saveReturn?: (data: any) => Promise<any>;
-      saveInvoice?: (data: any) => Promise<any>;
-      deleteInvoice?: (id: any) => Promise<any>;
-      getWarehouseStocks?: (warehouseId?: any) => Promise<any[]>;
-      saveWarehouse?: (data: any) => Promise<any>;
-      deleteWarehouse?: (id: any) => Promise<any>;
-      addWarehouseTransaction?: (data: any) => Promise<any>;
-      getShareholdersStatistics?: () => Promise<any>;
-      getShareholders?: () => Promise<any[]>;
-      addShareholderDirect?: (data: any) => Promise<any>;
-      updateShareholder?: (data: any) => Promise<any>;
-      deleteShareholder?: (id: any) => Promise<any>;
-      getSystemUsers?: () => Promise<any[]>;
-      saveUserAccount?: (data: any) => Promise<any>;
-      addAuditLog?: (data: any) => Promise<any>;
-      deleteUserAccount?: (id: any) => Promise<any>;
-      getWarehouses?: () => Promise<any[]>;
-      getProducts?: () => Promise<any[]>;
-      addPerson?: (data: any) => Promise<any>;
-      getDbStats?: () => Promise<any>;
-      getConfig?: () => Promise<any>;
-      changeDbPath?: (data?: any) => Promise<any>;
-      saveConfig?: (data: any) => Promise<any>;
-      checkOnboardingStatus?: () => Promise<any>;
-      performOnboarding?: (data: any) => Promise<any>;
-      getSellers?: () => Promise<any[]>;
-      addSellerDirect?: (data: any) => Promise<any>;
-      updateSeller?: (data: any) => Promise<any>;
-      deleteSeller?: (id: any) => Promise<any>;
-      deleteProduct?: (id: any) => Promise<any>;
-      getProductSalesHistory?: (id: any) => Promise<any>;
-      getProductPurchaseHistory?: (id: any) => Promise<any>;
-      getProductInventoryCirculation?: (id: any) => Promise<any>;
-      getCategories?: () => Promise<any[]>;
-      getBrands?: () => Promise<any[]>;
-      selectLocalImage?: () => Promise<any>;
-      saveProduct?: (data: any) => Promise<any>;
-      getDebtorsCreditorsSummary?: () => Promise<any>;
-      deleteBrand?: (id: any) => Promise<any>;
       onCopyProgress?: (callback: (data: { id: string; progress: number; bytesCopied: number; totalBytes: number; speedMbs: number; completed?: boolean; error?: string }) => void) => void;
       onDownloadProgress?: (callback: (data: any) => void) => void;
-      [key: string]: any;
+      onDownloadTaskProgress?: (callback: (data: { id: string; progress: number; bytesWritten: number; totalBytes: number; speedMbs: number; currentSpeedMbs?: number; timeElapsed?: number; completed?: boolean; error?: string }) => void) => void;
+      cancelCopy?: (id: string) => Promise<{ success: boolean; error?: string }>;
+      saveInvoiceImage?: (destDir: string, dataUrl: string, filename: string) => Promise<{ success: boolean; error?: string }>;
+      windowControl?: any;
+      getDbStats?: any;
+      checkOnboardingStatus?: any;
     };
   }
-  type Person = { id: string; [key: string]: any };
 }
 
 export function getSafePosterUrl(poster: string | undefined | null): string {
@@ -273,67 +241,5 @@ export function getSafePosterUrl(poster: string | undefined | null): string {
   return formatted;
 }
 
-export interface SystemUser {
-  id: string;
-  [key: string]: any;
-}
-
-export interface Person {
-  id: string;
-  [key: string]: any;
-}
-
-export interface Warehouse {
-  id: string;
-  [key: string]: any;
-}
-
-export interface WarehouseStock {
-  id: string;
-  [key: string]: any;
-}
-
-export interface Product {
-  id: string;
-  [key: string]: any;
-}
-
-export interface Shareholder {
-  id: string;
-  [key: string]: any;
-}
-
-export interface Seller {
-  id: string;
-  [key: string]: any;
-}
-
-export interface Category {
-  id: string;
-  [key: string]: any;
-}
-
-export interface Brand {
-  id: string;
-  [key: string]: any;
-}
-
-export interface Invoice {
-  id: string;
-  [key: string]: any;
-}
-
-export interface Employee {
-  id: string;
-  [key: string]: any;
-}
-
-export interface EmployeeTransaction {
-  id: string;
-  [key: string]: any;
-}
-
-
-
-
+export type Person = any;
 

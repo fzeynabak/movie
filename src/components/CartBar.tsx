@@ -29,7 +29,8 @@ import {
   HardDrive,
   Copy,
   Check,
-  AlertTriangle
+  AlertTriangle,
+  Loader2
 } from 'lucide-react';
 
 interface CartBarProps {
@@ -48,6 +49,7 @@ interface CartBarProps {
   onAddSession: (customerName?: string) => void;
   onCloseSession: (id: string) => void;
   onUpdateDrivePath: (drivePath: string) => void;
+  onUpdateDriveCapacity: (capacity: number) => void;
 }
 
 export default function CartBar({
@@ -64,7 +66,8 @@ export default function CartBar({
   onSelectSession,
   onAddSession,
   onCloseSession,
-  onUpdateDrivePath
+  onUpdateDrivePath,
+  onUpdateDriveCapacity
 }: CartBarProps) {
   const [showCustomerModal, setShowCustomerModal] = useState(false);
   const [showInvoiceModal, setShowInvoiceModal] = useState(false);
@@ -73,6 +76,70 @@ export default function CartBar({
   const [discountInput, setDiscountInput] = useState<number>(0);
   const [customerSearchQuery, setCustomerSearchQuery] = useState('');
   const [saveInvoiceLocal, setSaveInvoiceLocal] = useState(true);
+
+  // Shopping Cart Size Tracker & Flash Space Checker
+  const [cartTotalSize, setCartTotalSize] = useState<number>(0);
+  const [isCalculatingSize, setIsCalculatingSize] = useState<boolean>(false);
+  const [diskSpace, setDiskSpace] = useState<{ freeBytes: number; totalBytes: number } | null>(null);
+
+  const formatBytes = (bytes: number): string => {
+    if (bytes === 0) return toPersianNums('0') + ' بایت';
+    const k = 1024;
+    const sizes = ['بایت', 'کیلوبایت', 'مگابایت', 'گیگابایت', 'ترابایت'];
+    const i = Math.floor(Math.log(bytes) / Math.log(k));
+    const formattedVal = parseFloat((bytes / Math.pow(k, i)).toFixed(2));
+    return toPersianNums(formattedVal.toString()) + ' ' + sizes[i];
+  };
+
+  const activeSession = sessions.find(s => s.id === activeSessionId) || sessions[0];
+  const drivePath = activeSession?.selectedDrivePath || '';
+
+  // 1. Calculate size of items in cart
+  useEffect(() => {
+    let active = true;
+    const calculateCartSize = async () => {
+      if (!cart || cart.length === 0) {
+        setCartTotalSize(0);
+        return;
+      }
+      setIsCalculatingSize(true);
+      
+      const uniquePaths = new Set<string>();
+      cart.forEach(item => {
+        if (item.videoPaths && item.videoPaths.length > 0) {
+          item.videoPaths.forEach(p => { if (p) uniquePaths.add(p); });
+        } else if (item.filePath) {
+          uniquePaths.add(item.filePath);
+        }
+      });
+
+      let total = 0;
+      try {
+        if (window.electronAPI && window.electronAPI.existsFile) {
+          const promises = Array.from(uniquePaths).map(async (p) => {
+            try {
+              const res = await window.electronAPI.existsFile(p);
+              return res && res.success && res.size ? res.size : 0;
+            } catch {
+              return 0;
+            }
+          });
+          const sizes = await Promise.all(promises);
+          total = sizes.reduce((sum, s) => sum + s, 0);
+        }
+      } catch (err) {
+        console.error('Error calculating cart size:', err);
+      } finally {
+        if (active) {
+          setCartTotalSize(total);
+          setIsCalculatingSize(false);
+        }
+      }
+    };
+
+    calculateCartSize();
+    return () => { active = false; };
+  }, [cart]);
 
   // Copy Progress State
   const [copyProgress, setCopyProgress] = useState<Record<string, {
@@ -83,6 +150,40 @@ export default function CartBar({
     completed: boolean;
     error?: string;
   }>>({});
+
+  // 2. Query free space of selected drive
+  useEffect(() => {
+    let active = true;
+    const checkDiskSpace = async () => {
+      if (!drivePath || !window.electronAPI || !window.electronAPI.getDiskSpace) {
+        setDiskSpace(null);
+        return;
+      }
+      try {
+        const res = await window.electronAPI.getDiskSpace(drivePath);
+        if (active && res && res.success && typeof res.freeBytes === 'number') {
+          setDiskSpace({
+            freeBytes: res.freeBytes,
+            totalBytes: res.totalBytes || 0
+          });
+        } else {
+          if (active) setDiskSpace(null);
+        }
+      } catch (err) {
+        console.error('Error fetching disk space:', err);
+        if (active) setDiskSpace(null);
+      }
+    };
+
+    checkDiskSpace();
+    
+    // Set an interval to poll disk space every 10 seconds to keep it fresh
+    const interval = setInterval(checkDiskSpace, 10000);
+    return () => {
+      active = false;
+      clearInterval(interval);
+    };
+  }, [drivePath, cart, copyProgress]);
 
   const [isCopyingAll, setIsCopyingAll] = useState(false);
   const currentCopyIndicesRef = useRef<Record<string, { current: number; total: number }>>({});
@@ -687,26 +788,139 @@ export default function CartBar({
         {(() => {
           const activeSession = sessions.find(s => s.id === activeSessionId) || sessions[0];
           const hasDrive = !!activeSession.selectedDrivePath;
+          const isOverCapacity = diskSpace && cartTotalSize > diskSpace.freeBytes;
           return (
-            <div className="flex items-center gap-2 bg-white/5 px-2.5 py-1.5 rounded-lg border border-white/5 text-[11px] font-bold self-start md:self-auto">
-              <HardDrive className={`w-4 h-4 ${hasDrive ? 'text-emerald-400 animate-pulse' : 'text-amber-500'}`} />
-              <div className="flex flex-col text-right">
-                <span className="text-[9px] text-gray-450">مسیر فلش دیسک (USB) مشتری</span>
-                <span className={`font-mono ${hasDrive ? 'text-emerald-400' : 'text-amber-500'}`}>
-                  {hasDrive ? activeSession.selectedDrivePath : 'انتخاب نشده ⚠️'}
-                </span>
+            <div className="flex flex-col gap-1.5 self-start md:self-auto max-w-sm">
+              <div className="flex items-center gap-2 bg-white/5 px-2.5 py-1.5 rounded-lg border border-white/5 text-[11px] font-bold">
+                <HardDrive className={`w-4 h-4 ${hasDrive ? (isOverCapacity ? 'text-red-400 animate-bounce' : 'text-emerald-400') : 'text-amber-500'}`} />
+                <div className="flex flex-col text-right">
+                  <span className="text-[9px] text-gray-450">مسیر فلش دیسک (USB) مشتری</span>
+                  <span className={`font-mono ${hasDrive ? (isOverCapacity ? 'text-red-400 font-extrabold' : 'text-emerald-400') : 'text-amber-500'}`}>
+                    {hasDrive ? activeSession.selectedDrivePath : 'انتخاب نشده ⚠️'}
+                  </span>
+                </div>
+                <button
+                  onClick={handleSelectDrive}
+                  className={`mr-3 h-7 px-2.5 rounded text-[10px] font-black transition-all cursor-pointer flex items-center gap-1 shrink-0 ${
+                    isOverCapacity 
+                      ? 'bg-red-600 hover:bg-red-500 text-white animate-pulse' 
+                      : 'bg-indigo-600 hover:bg-indigo-700 text-white'
+                  }`}
+                >
+                  <FolderOpen className="w-3 h-3" />
+                  <span>{hasDrive ? 'تغییر مسیر' : 'انتخاب فلش دیسک'}</span>
+                </button>
               </div>
-              <button
-                onClick={handleSelectDrive}
-                className="mr-3 h-7 px-2.5 rounded bg-indigo-600 hover:bg-indigo-700 text-white text-[10px] font-black transition-all cursor-pointer flex items-center gap-1"
-              >
-                <FolderOpen className="w-3 h-3" />
-                <span>{hasDrive ? 'تغییر مسیر' : 'انتخاب فلش دیسک'}</span>
-              </button>
+
+              {/* Real-time Space Indicator bar if drive is selected */}
+              {hasDrive && diskSpace && (
+                <div className="bg-slate-900/65 backdrop-blur-sm px-2.5 py-1.5 rounded-lg border border-white/5 text-[10px] flex flex-col gap-1 text-right max-w-[280px]">
+                  <div className="flex justify-between items-center text-[9px]">
+                    <span className="text-gray-400">حجم کل فلش دیسک:</span>
+                    <span className="font-mono text-gray-200">{formatBytes(diskSpace.totalBytes)}</span>
+                  </div>
+                  <div className="flex justify-between items-center text-[9px] font-bold">
+                    <span className="text-gray-400">فضای خالی موجود:</span>
+                    <span className={`font-mono ${isOverCapacity ? 'text-red-400' : 'text-emerald-400'}`}>{formatBytes(diskSpace.freeBytes)}</span>
+                  </div>
+                  
+                  {/* Space Progress Bar */}
+                  {diskSpace.totalBytes > 0 && (
+                    <div className="w-full h-1 bg-white/10 rounded-full overflow-hidden mt-0.5">
+                      <div 
+                        className={`h-full rounded-full transition-all duration-500 ${isOverCapacity ? 'bg-red-500' : 'bg-emerald-500'}`}
+                        style={{ width: `${Math.min(100, Math.round(((diskSpace.totalBytes - diskSpace.freeBytes) / diskSpace.totalBytes) * 100))}%` }}
+                      />
+                    </div>
+                  )}
+
+                  {/* Warn the user if cart is over limit */}
+                  {isOverCapacity && (
+                    <div className="flex items-center gap-1 text-red-400 font-extrabold text-[8.5px] mt-1 bg-red-950/40 px-1.5 py-1 rounded border border-red-900/40">
+                      <AlertTriangle className="w-3 h-3 shrink-0" />
+                      <span>کمبود فضا! حجم سبد ({formatBytes(cartTotalSize)}) از فضای خالی فلش بیشتر است.</span>
+                    </div>
+                  )}
+                </div>
+              )}
             </div>
           );
         })()}
       </div>
+
+      {/* Dynamic 2-Level USB Copy Progress Panel */}
+      {(() => {
+        const activeCopyingItem = cart.find(item => {
+          const prog = copyProgress[item.id];
+          return prog && !prog.completed && !prog.error;
+        });
+
+        // Show panel if we are actively copying
+        const isCopyingActive = isCopyingAll || activeCopyingItem;
+        if (!isCopyingActive) return null;
+
+        const currentFileProgress = activeCopyingItem ? (copyProgress[activeCopyingItem.id]?.progress || 0) : 0;
+        const speedMbs = activeCopyingItem ? (copyProgress[activeCopyingItem.id]?.speedMbs || 0) : 0;
+        
+        const totalItems = cart.length;
+        const completedItemsCount = cart.filter(item => copyProgress[item.id]?.completed).length;
+        
+        const completedWeight = completedItemsCount * 100;
+        const activeWeight = activeCopyingItem ? currentFileProgress : 0;
+        const overallProgressPercent = totalItems > 0 ? Math.min(100, Math.round((completedWeight + activeWeight) / totalItems)) : 0;
+
+        return (
+          <div className="w-full bg-slate-900/60 dark:bg-slate-950/70 p-4.5 rounded-xl border border-indigo-500/20 flex flex-col gap-4 animate-pulse-slow">
+            {/* Header / Info */}
+            <div className="flex flex-col md:flex-row md:items-center justify-between gap-2.5 border-b border-white/5 pb-2.5">
+              <div className="flex items-center gap-2">
+                <Loader2 className="w-4 h-4 text-indigo-400 animate-spin" />
+                <span className="text-xs font-extrabold text-gray-200">کپی زنده فایل‌ها به فلش دیسک مشتری</span>
+              </div>
+              <div className="flex items-center gap-4 text-[10px] text-gray-400 font-bold">
+                {speedMbs > 0 && (
+                  <span>سرعت انتقال: <span className="text-emerald-400 font-mono">{toPersianNums(speedMbs.toFixed(1))} MB/s</span></span>
+                )}
+                <span>آیتم‌های تکمیل شده: <span className="text-indigo-400 font-mono">{toPersianNums(completedItemsCount.toString())} از {toPersianNums(totalItems.toString())}</span></span>
+              </div>
+            </div>
+
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+              {/* 1. Current File Progress */}
+              <div className="flex flex-col gap-2">
+                <div className="flex justify-between items-center text-[10px] font-bold">
+                  <span className="text-indigo-300 truncate max-w-[250px]">
+                    {activeCopyingItem ? `فایل فعلی: ${activeCopyingItem.mediaTitle}` : 'درحال آماده‌سازی...'}
+                  </span>
+                  <span className="text-indigo-400 font-mono">{toPersianNums(currentFileProgress.toString())}٪</span>
+                </div>
+                {/* Visual Bar */}
+                <div className="w-full h-2.5 bg-white/5 rounded-full overflow-hidden">
+                  <div 
+                    className="h-full bg-gradient-to-l from-indigo-500 to-cyan-500 rounded-full transition-all duration-300 ease-out"
+                    style={{ width: `${currentFileProgress}%` }}
+                  />
+                </div>
+              </div>
+
+              {/* 2. Overall Queue Progress */}
+              <div className="flex flex-col gap-2">
+                <div className="flex justify-between items-center text-[10px] font-bold">
+                  <span className="text-emerald-300">کل فایل‌های صف ({toPersianNums(completedItemsCount.toString())} از {toPersianNums(totalItems.toString())})</span>
+                  <span className="text-emerald-400 font-mono">{toPersianNums(overallProgressPercent.toString())}٪</span>
+                </div>
+                {/* Visual Bar */}
+                <div className="w-full h-2.5 bg-white/5 rounded-full overflow-hidden">
+                  <div 
+                    className="h-full bg-gradient-to-l from-emerald-500 to-teal-400 rounded-full transition-all duration-300 ease-out"
+                    style={{ width: `${overallProgressPercent}%` }}
+                  />
+                </div>
+              </div>
+            </div>
+          </div>
+        );
+      })()}
 
       <div className="bg-gradient-to-r from-slate-900 via-indigo-950 to-slate-900 text-white rounded-2xl p-4.5 shadow-xl border border-indigo-900/60 flex flex-col md:flex-row items-center justify-between gap-4 select-none relative overflow-hidden" id="customer-cart-bar">
       
@@ -761,7 +975,7 @@ export default function CartBar({
         <div className="text-right flex flex-col items-start md:items-end">
           <span className="text-[10px] text-indigo-300 font-extrabold">کالاهای موقت در سبد</span>
           <span className="text-xs font-black mt-0.5 text-gray-100">
-            {toPersianNums(cart.length)} عدد رسانه <span className="text-gray-400">|</span> <span className="text-indigo-400">{formatCurrency(cartSubtotal)}</span>
+            {toPersianNums(cart.length)} عدد رسانه {isCalculatingSize ? '(در حال محاسبه حجم...)' : `(${formatBytes(cartTotalSize)})`} <span className="text-gray-400">|</span> <span className="text-indigo-400">{formatCurrency(cartSubtotal)}</span>
           </span>
         </div>
 
@@ -795,6 +1009,22 @@ export default function CartBar({
               </span>
             )}
           </button>
+
+          {cart.length > 0 && (
+            <button
+              onClick={handleCopyAllToUsb}
+              disabled={isCopyingAll}
+              className={`h-11 px-4 rounded-xl text-xs font-black flex items-center gap-2.5 transition-all cursor-pointer bg-emerald-600 hover:bg-emerald-700 text-white shadow-lg shadow-emerald-600/30 ring-2 ring-emerald-500/25 active:scale-95 disabled:opacity-50`}
+              id="btn-copy-all-flash-bottom"
+            >
+              {isCopyingAll ? (
+                <Loader2 className="w-4 h-4 animate-spin" />
+              ) : (
+                <HardDrive className="w-4 h-4" />
+              )}
+              <span>کپی به فلش</span>
+            </button>
+          )}
         </div>
       </div>
 

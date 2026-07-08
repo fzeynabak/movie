@@ -24,7 +24,13 @@
     "noEmit": true
   },
   "include": [
-    "src/**/*",
-    "electron/**/*"
+    "src",
+    "electron"
+  ],
+  "exclude": [
+    "node_modules",
+    "dist",
+    "myinvoice",
+    "wordpress-plugin"
   ]
 }

@@ -7,7 +7,6 @@ import React, { useState, useEffect } from 'react';
 import { dbService } from '../db/databaseService';
 import { Series, Season, Episode, MediaCategory, getSafePosterUrl } from '../types';
 import { toPersianNums, formatCurrency } from './Dashboard';
-import { CATEGORIES } from './Movies';
 import { showToast, showAlert, showConfirm } from '../utils/toast';
 import { MediaScanner, ScannedMediaItem } from '../utils/MediaScanner';
 import { SettingsService } from '../utils/SettingsService';
@@ -69,7 +68,16 @@ export default function SeriesPage({
 }: SeriesProps) {
   const [seriesList, setSeriesList] = useState<Series[]>([]);
   const [selectedCategory, setSelectedCategory] = useState<MediaCategory | 'همه'>('همه');
+  const [searchQueryInput, setSearchQueryInput] = useState('');
   const [searchQuery, setSearchQuery] = useState('');
+
+  // Debounce search query to keep typing lag-free and super responsive
+  useEffect(() => {
+    const timer = setTimeout(() => {
+      setSearchQuery(searchQueryInput);
+    }, 200);
+    return () => clearTimeout(timer);
+  }, [searchQueryInput]);
 
   // Filters
   const [filterCountry, setFilterCountry] = useState('');
@@ -95,6 +103,18 @@ export default function SeriesPage({
 
   // Advanced List and Card View Toggle State
   const [viewMode, setViewMode] = useState<'card' | 'list'>('card');
+  const [availableCategories, setAvailableCategories] = useState<string[]>(() => {
+    const settings = dbService.getSettings();
+    return settings.customCategories && settings.customCategories.length > 0 
+      ? settings.customCategories 
+      : ['ایرانی', 'خارجی', 'انیمیشن', 'کره‌ای', 'هندی', 'متفرقه'];
+  });
+  const [availableQualities, setAvailableQualities] = useState<string[]>(() => {
+    const settings = dbService.getSettings();
+    return settings.customQualities && settings.customQualities.length > 0 
+      ? settings.customQualities 
+      : ['1080p BluRay', '1080p WEB-DL', '720p BluRay', '720p WEB-DL', '4K UltraHD', '1080p x265 10bit', '720p x265 10bit'];
+  });
   const [colFilters, setColFilters] = useState<Record<string, string>>({
     titleFa: '',
     titleEn: '',
@@ -320,8 +340,40 @@ export default function SeriesPage({
     setFormActors(metadata.cast ? metadata.cast.join(', ') : '');
     setFormEpisodeDuration(metadata.runtime ? `${metadata.runtime} دقیقه` : '۴۵ دقیقه');
     setFormCountry(metadata.countries ? metadata.countries.join(', ') : 'خارجی');
-    setFormLanguage(formCategory.includes('ایرانی') ? 'فارسی' : 'زبان اصلی (زیرنویس فارسی)');
     setFormImdbRating(metadata.rating ? metadata.rating.toFixed(1) : '0.0');
+
+    // Smart auto-categorization based on TMDB metadata
+    let detectedCategory = 'خارجی';
+    const originalLang = (metadata.originalLanguage || '').toLowerCase();
+    const countries = (metadata.countries || []).map((c: string) => c.toLowerCase());
+    const genres = (metadata.genres || []).map((g: string) => g.toLowerCase());
+
+    if (genres.includes('animation') || genres.includes('انیمیشن') || genres.includes('kids')) {
+      detectedCategory = 'انیمیشن';
+    } else if (countries.includes('iran') || countries.includes('ir') || countries.includes('ایران')) {
+      detectedCategory = 'ایرانی';
+    } else if (countries.includes('south korea') || countries.includes('korea') || countries.includes('kr') || countries.includes('کره')) {
+      detectedCategory = 'کره‌ای';
+    } else if (countries.includes('india') || countries.includes('in') || countries.includes('هند')) {
+      detectedCategory = 'هندی';
+    } else if (countries.includes('turkey') || countries.includes('tr') || countries.includes('ترکیه') || countries.includes('ترک') || originalLang === 'tr') {
+      detectedCategory = 'ترکی';
+    } else if (countries.includes('china') || countries.includes('cn') || countries.includes('چین') || originalLang === 'zh') {
+      detectedCategory = 'چینی';
+    }
+
+    // fallback to check if detected category actually exists in available categories, else fallback to 'خارجی'
+    const bestCategoryMatch = availableCategories.find(cat => cat.toLowerCase() === detectedCategory.toLowerCase() || cat.includes(detectedCategory)) || 'خارجی';
+    setFormCategory(bestCategoryMatch);
+
+    // Smart auto-language default
+    if (bestCategoryMatch.includes('ایرانی')) {
+      setFormLanguage('فارسی (ایرانی)');
+      setFormSubtitle('بدون زیرنویس');
+    } else {
+      setFormLanguage('دوبله/دوزبانه');
+      setFormSubtitle('زیرنویس چسبیده فارسی');
+    }
 
     // Translate and normalize genres to map to POPULAR_GENRES
     const genreTranslations: Record<string, string> = {
@@ -873,6 +925,12 @@ export default function SeriesPage({
     setSeriesList(dbService.getSeries());
     const settings = dbService.getSettings();
     setPageSize(settings.pageSize || 20);
+    if (settings.customCategories && settings.customCategories.length > 0) {
+      setAvailableCategories(settings.customCategories);
+    }
+    if (settings.customQualities && settings.customQualities.length > 0) {
+      setAvailableQualities(settings.customQualities);
+    }
   };
 
   // 1. Populate form for Edit
@@ -1530,7 +1588,7 @@ export default function SeriesPage({
         .replace(/[^a-zA-Z0-9\s-_]/g, '') // remove special characters
         .replace(/\s+/g, '-'); // replace spaces with hyphens
 
-      const seasonNum = currentSeason.seasonNumber || 1;
+      const seasonNum = (currentSeason as any).seasonNumber || (managingSeries.seasons.indexOf(currentSeason) + 1);
       const sStr = seasonNum.toString().padStart(2, '0');
 
       // Create a cloned version of seasons list
@@ -1611,6 +1669,108 @@ export default function SeriesPage({
     } catch (err: any) {
       console.error('Error auto renaming files:', err);
       showToast('بروز خطا در هنگام تغییر نام فایل‌ها: ' + err.message, 'error');
+    }
+  };
+
+  const handleAutoRenameAllSeasonsOfSeries = async (targetSeries: Series) => {
+    if (!targetSeries) return;
+
+    if (!window.confirm(`آیا مطمئن هستید که می‌خواهید نام فیزیکی تمامی فایل‌های ویدئویی تمامی فصول این سریال (${targetSeries.titleFa}) را به فرمت استاندارد (مثلاً ${targetSeries.titleEn || 'Series'}-S01E01) تغییر نام دهید؟ این عملیات فایل‌های واقعی روی هارد دیسک را تغییر نام خواهد داد.`)) {
+      return;
+    }
+
+    try {
+      showToast('در حال تغییر نام فیزیکی فایل‌های تمامی فصول...', 'info');
+      let successRenames = 0;
+      let failedRenames = 0;
+
+      const rawTitle = targetSeries.titleEn || targetSeries.titleFa || 'Series';
+      const cleanTitle = rawTitle
+        .trim()
+        .replace(/[^a-zA-Z0-9\s-_]/g, '')
+        .replace(/\s+/g, '-');
+
+      const updatedSeasonsList = JSON.parse(JSON.stringify(targetSeries.seasons || [])) as Season[];
+
+      for (const s of updatedSeasonsList) {
+        const seasonNum = (s as any).seasonNumber || (updatedSeasonsList.indexOf(s) + 1);
+        const sStr = seasonNum.toString().padStart(2, '0');
+
+        for (const ep of s.episodes || []) {
+          const oldPath = ep.videoPath;
+          if (!oldPath) continue;
+
+          // Check if file actually exists
+          const check = window.electronAPI && window.electronAPI.existsFile ? await window.electronAPI.existsFile(oldPath) : null;
+          if (!check || !check.exists) {
+            continue;
+          }
+
+          // Get extension
+          const extIdx = oldPath.lastIndexOf('.');
+          const ext = extIdx !== -1 ? oldPath.substring(extIdx).toLowerCase() : '.mkv';
+
+          // Extract folder path
+          const lastSlash = Math.max(oldPath.lastIndexOf('\\'), oldPath.lastIndexOf('/'));
+          const folder = oldPath.substring(0, lastSlash + 1);
+          const originalFileName = oldPath.substring(lastSlash + 1);
+
+          // Try to extract quality
+          let qualitySuffix = '';
+          const qualMatch = originalFileName.match(/(1080|720|480)/);
+          if (qualMatch) {
+            qualitySuffix = `-${qualMatch[1]}`;
+          } else if (targetSeries.quality) {
+            const sQualMatch = targetSeries.quality.match(/(1080|720|480)/);
+            if (sQualMatch) {
+              qualitySuffix = `-${sQualMatch[1]}`;
+            }
+          }
+
+          const eStr = (ep.episodeNumber || 1).toString().padStart(2, '0');
+          const newFileName = `${cleanTitle}-S${sStr}E${eStr}${qualitySuffix}${ext}`;
+          const newPath = folder + newFileName;
+
+          if (oldPath.toLowerCase() !== newPath.toLowerCase()) {
+            if (window.electronAPI && window.electronAPI.renameFile) {
+              const renameRes = await window.electronAPI.renameFile(oldPath, newPath);
+              if (renameRes && renameRes.success) {
+                ep.videoPath = newPath;
+                successRenames++;
+              } else {
+                failedRenames++;
+              }
+            }
+          } else if (oldPath !== newPath) {
+            if (window.electronAPI && window.electronAPI.renameFile) {
+              const renameRes = await window.electronAPI.renameFile(oldPath, newPath);
+              if (renameRes && renameRes.success) {
+                ep.videoPath = newPath;
+                successRenames++;
+              }
+            }
+          }
+        }
+      }
+
+      if (successRenames > 0 || failedRenames > 0) {
+        dbService.updateSeries(targetSeries.id, { seasons: updatedSeasonsList });
+        refreshData();
+        // Update local detail/managing states if they match
+        if (detailSeries && detailSeries.id === targetSeries.id) {
+          const updated = dbService.getSeries().find(s => s.id === targetSeries.id);
+          if (updated) setDetailSeries(updated);
+        }
+        if (managingSeries && managingSeries.id === targetSeries.id) {
+          const updated = dbService.getSeries().find(s => s.id === targetSeries.id);
+          if (updated) setManagingSeries(updated);
+        }
+        showAlert(`عملیات تغییر نام به اتمام رسید.\nتعداد ${successRenames} فایل با موفقیت تغییر نام یافتند.\nتعداد ${failedRenames} خطا رخ داد.`, 'success', 'تغییر نام فیزیکی فایل‌ها');
+      } else {
+        showAlert('تمامی فایل‌ها از قبل نام‌گذاری استاندارد داشتند یا فایلی روی دیسک یافت نشد.', 'info', 'اطلاع');
+      }
+    } catch (err: any) {
+      showToast('خطا در تغییر نام فایل‌ها: ' + err.message, 'error');
     }
   };
 
@@ -1804,66 +1964,74 @@ export default function SeriesPage({
   };
 
   // Filter List Logic
-  const filteredSeries = seriesList.filter(item => {
-    const seriesCats = item.category ? item.category.split(',').map(c => c.trim()) : [];
-    const matchesCategory = selectedCategory === 'همه' || seriesCats.includes(selectedCategory);
-    const matchesSearch = 
-      item.titleFa.toLowerCase().includes(searchQuery.toLowerCase()) ||
-      item.titleEn.toLowerCase().includes(searchQuery.toLowerCase()) ||
-      item.director.toLowerCase().includes(searchQuery.toLowerCase()) ||
-      item.actors.toLowerCase().includes(searchQuery.toLowerCase());
+  const filteredSeries = React.useMemo(() => {
+    return seriesList.filter(item => {
+      const seriesCats = item.category ? item.category.split(',').map(c => c.trim()) : [];
+      const matchesCategory = selectedCategory === 'همه' || seriesCats.includes(selectedCategory);
+      const matchesSearch = 
+        item.titleFa.toLowerCase().includes(searchQuery.toLowerCase()) ||
+        item.titleEn.toLowerCase().includes(searchQuery.toLowerCase()) ||
+        item.director.toLowerCase().includes(searchQuery.toLowerCase()) ||
+        item.actors.toLowerCase().includes(searchQuery.toLowerCase());
 
-    const matchesCountry = !filterCountry || item.country.includes(filterCountry);
-    const matchesLanguage = !filterLanguage || item.language.includes(filterLanguage);
-    const matchesGenre = !filterGenre || (item.genres && item.genres.some(g => g.includes(filterGenre)));
-    const matchesYear = !filterYear || toGregorianNumStr(item.year).includes(toGregorianNumStr(filterYear));
-    const matchesQuality = !filterQuality || (item.quality && item.quality.toLowerCase().includes(filterQuality.toLowerCase()));
-    
-    const imdbVal = parseFloat(toGregorianNumStr(item.imdbRating)) || 0;
-    const minImdbVal = parseFloat(toGregorianNumStr(filterMinImdb)) || 0;
-    const matchesMinImdb = !filterMinImdb || imdbVal >= minImdbVal;
-    
-    const matchesCrew = !filterCrew || 
-      item.director.toLowerCase().includes(filterCrew.toLowerCase()) ||
-      item.actors.toLowerCase().includes(filterCrew.toLowerCase()) ||
-      (item.writer && item.writer.toLowerCase().includes(filterCrew.toLowerCase()));
+      const matchesCountry = !filterCountry || item.country.includes(filterCountry);
+      const matchesLanguage = !filterLanguage || item.language.includes(filterLanguage);
+      const matchesGenre = !filterGenre || (item.genres && item.genres.some(g => g.includes(filterGenre)));
+      const matchesYear = !filterYear || toGregorianNumStr(item.year).includes(toGregorianNumStr(filterYear));
+      const matchesQuality = !filterQuality || (item.quality && item.quality.toLowerCase().includes(filterQuality.toLowerCase()));
+      
+      const imdbVal = parseFloat(toGregorianNumStr(item.imdbRating)) || 0;
+      const minImdbVal = parseFloat(toGregorianNumStr(filterMinImdb)) || 0;
+      const matchesMinImdb = !filterMinImdb || imdbVal >= minImdbVal;
+      
+      const matchesCrew = !filterCrew || 
+        item.director.toLowerCase().includes(filterCrew.toLowerCase()) ||
+        item.actors.toLowerCase().includes(filterCrew.toLowerCase()) ||
+        (item.writer && item.writer.toLowerCase().includes(filterCrew.toLowerCase()));
 
-    // Advanced Column-Header Filters
-    const matchesColTitleFa = !colFilters.titleFa || item.titleFa.toLowerCase().includes(colFilters.titleFa.toLowerCase());
-    const matchesColTitleEn = !colFilters.titleEn || item.titleEn.toLowerCase().includes(colFilters.titleEn.toLowerCase());
-    const matchesColQuality = !colFilters.quality || (item.quality || '').toLowerCase().includes(colFilters.quality.toLowerCase());
-    const matchesColImdb = !colFilters.imdbRating || item.imdbRating.toLowerCase().includes(colFilters.imdbRating.toLowerCase());
-    const matchesColYear = !colFilters.year || item.year.toLowerCase().includes(colFilters.year.toLowerCase());
-    const matchesColCategory = !colFilters.category || (item.category || '').toLowerCase().includes(colFilters.category.toLowerCase());
+      // Advanced Column-Header Filters
+      const matchesColTitleFa = !colFilters.titleFa || item.titleFa.toLowerCase().includes(colFilters.titleFa.toLowerCase());
+      const matchesColTitleEn = !colFilters.titleEn || item.titleEn.toLowerCase().includes(colFilters.titleEn.toLowerCase());
+      const matchesColQuality = !colFilters.quality || (item.quality || '').toLowerCase().includes(colFilters.quality.toLowerCase());
+      const matchesColImdb = !colFilters.imdbRating || item.imdbRating.toLowerCase().includes(colFilters.imdbRating.toLowerCase());
+      const matchesColYear = !colFilters.year || item.year.toLowerCase().includes(colFilters.year.toLowerCase());
+      const matchesColCategory = !colFilters.category || (item.category || '').toLowerCase().includes(colFilters.category.toLowerCase());
 
-    return matchesCategory && matchesSearch && matchesCountry && matchesLanguage && matchesGenre && matchesYear && matchesQuality && matchesMinImdb && matchesCrew &&
-      matchesColTitleFa && matchesColTitleEn && matchesColQuality && matchesColImdb && matchesColYear && matchesColCategory;
-  });
+      return matchesCategory && matchesSearch && matchesCountry && matchesLanguage && matchesGenre && matchesYear && matchesQuality && matchesMinImdb && matchesCrew &&
+        matchesColTitleFa && matchesColTitleEn && matchesColQuality && matchesColImdb && matchesColYear && matchesColCategory;
+    });
+  }, [seriesList, selectedCategory, searchQuery, filterCountry, filterLanguage, filterGenre, filterYear, filterQuality, filterMinImdb, filterCrew, colFilters]);
 
   // Sort
-  const sortedSeries = [...filteredSeries].sort((a, b) => {
-    let fieldA: any = a[sortBy];
-    let fieldB: any = b[sortBy];
+  const sortedSeries = React.useMemo(() => {
+    return [...filteredSeries].sort((a, b) => {
+      let fieldA: any = a[sortBy];
+      let fieldB: any = b[sortBy];
 
-    if (sortBy === 'imdbRating') {
-      fieldA = Number(a.imdbRating) || 0;
-      fieldB = Number(b.imdbRating) || 0;
-    }
+      if (sortBy === 'imdbRating') {
+        fieldA = Number(a.imdbRating) || 0;
+        fieldB = Number(b.imdbRating) || 0;
+      }
 
-    if (sortOrder === 'desc') {
-      return fieldA > fieldB ? -1 : 1;
-    } else {
-      return fieldA < fieldB ? -1 : 1;
-    }
-  });
+      if (sortOrder === 'desc') {
+        return fieldA > fieldB ? -1 : 1;
+      } else {
+        return fieldA < fieldB ? -1 : 1;
+      }
+    });
+  }, [filteredSeries, sortBy, sortOrder]);
 
   // Paginated List
   const totalItems = sortedSeries.length;
   const totalPages = Math.ceil(totalItems / pageSize) || 1;
-  const paginatedSeries = sortedSeries.slice((currentPage - 1) * pageSize, currentPage * pageSize);
+  const paginatedSeries = React.useMemo(() => {
+    return sortedSeries.slice((currentPage - 1) * pageSize, currentPage * pageSize);
+  }, [sortedSeries, currentPage, pageSize]);
 
   // Helper to extract unique genres present in seriesList
-  const allAvailableGenres = Array.from(new Set(seriesList.flatMap(s => s.genres || [])));
+  const allAvailableGenres = React.useMemo(() => {
+    return Array.from(new Set(seriesList.flatMap(s => s.genres || [])));
+  }, [seriesList]);
 
   return (
     <div className="space-y-6" id="series-tab-content">
@@ -1894,8 +2062,8 @@ export default function SeriesPage({
       </div>
 
       {/* Categories Tabs Selector and View Switcher */}
-      <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3 border-b border-gray-150 dark:border-gray-800 pb-2" id="series-category-selector-wrapper">
-        <div className="flex items-center overflow-x-auto gap-2 pb-1 scrollbar-none" id="series-category-selector">
+      <div className="flex flex-col xl:flex-row xl:items-center xl:justify-between gap-4 border-b border-gray-150 dark:border-gray-800 pb-2" id="series-category-selector-wrapper">
+        <div className="flex items-center overflow-x-auto gap-2 pb-2 scrollbar-thin-x w-full min-w-0 xl:flex-1" id="series-category-selector">
           <button
             onClick={() => { setSelectedCategory('همه'); setCurrentPage(1); }}
             className={`px-4 py-2 text-xs font-semibold rounded-lg shrink-0 transition-colors cursor-pointer ${
@@ -1907,7 +2075,7 @@ export default function SeriesPage({
           >
             همه سریال‌ها ({toPersianNums(seriesList.length)})
           </button>
-          {CATEGORIES.map(cat => {
+          {availableCategories.map(cat => {
             const count = seriesList.filter(s => s.category && s.category.split(',').map(c => c.trim()).includes(cat)).length;
             return (
               <button
@@ -1927,7 +2095,7 @@ export default function SeriesPage({
         </div>
 
         {/* Beautiful Segmented Toggle for Card vs Advanced List View */}
-        <div className="flex items-center gap-1 bg-gray-100 dark:bg-slate-800 p-1 rounded-lg shrink-0 border border-gray-200 dark:border-slate-700/50 self-end sm:self-auto shadow-inner">
+        <div className="flex items-center gap-1 bg-gray-100 dark:bg-slate-800 p-1 rounded-lg shrink-0 border border-gray-200 dark:border-slate-700/50 self-start xl:self-auto shadow-inner">
           <button
             type="button"
             onClick={() => setViewMode('card')}
@@ -1966,8 +2134,8 @@ export default function SeriesPage({
             <input
               type="text"
               placeholder="جستجو در نام سریال، بازیگران، کارگردان..."
-              value={searchQuery}
-              onChange={(e) => { setSearchQuery(e.target.value); setCurrentPage(1); }}
+              value={searchQueryInput}
+              onChange={(e) => { setSearchQueryInput(e.target.value); setCurrentPage(1); }}
               className="w-full pr-10 pl-4 h-10 bg-gray-50 dark:bg-slate-800/60 rounded-lg text-xs font-medium border border-gray-150 dark:border-gray-700 text-gray-800 dark:text-gray-100 placeholder-gray-400 focus:outline-none focus:border-sky-500 animate-fadeIn"
               id="series-search-input"
             />
@@ -2017,6 +2185,7 @@ export default function SeriesPage({
                   <option value="دوبله فارسی">دوبله فارسی</option>
                   <option value="زبان اصلی">زبان اصلی</option>
                   <option value="دوزبانه (دوبله و زبان اصلی)">دوزبانه (دوبله و زبان اصلی)</option>
+                  <option value="ایرانی (زبان اصلی فارسی)">ایرانی (زبان اصلی فارسی)</option>
                 </select>
               </div>
 
@@ -2132,6 +2301,7 @@ export default function SeriesPage({
                   setFilterCrew('');
                   setSortBy('addedAt');
                   setSortOrder('desc');
+                  setSearchQueryInput('');
                   setSearchQuery('');
                   setSelectedCategory('همه');
                   setCurrentPage(1);
@@ -2188,8 +2358,8 @@ export default function SeriesPage({
                       <div className="flex items-center gap-1.5 flex-wrap">
                         <div className="flex flex-wrap gap-1">
                           {series.isEnded && (
-                            <span className="text-[9px] bg-red-100 text-red-700 dark:bg-red-950/40 dark:text-red-400 px-1.5 py-0.5 rounded font-bold shrink-0 animate-pulse border border-red-200 dark:border-red-900/30">
-                              🎬 {series.isEndedText || 'پایان یافته'}
+                            <span className="text-[9px] bg-rose-50 text-rose-600 dark:bg-rose-950/35 dark:text-rose-400 px-1.5 py-0.5 rounded font-bold shrink-0 border border-rose-100 dark:border-rose-900/35">
+                              {series.isEndedText || 'پایان یافته'}
                             </span>
                           )}
                           {(series.category || 'متفرقه').split(',').map(cat => (
@@ -2785,7 +2955,7 @@ export default function SeriesPage({
                 <div className="space-y-1.5 bg-gray-50/50 dark:bg-slate-800/40 p-2.5 rounded-xl border border-gray-150 dark:border-slate-800 md:col-span-1">
                   <label className="text-[10px] font-black text-gray-400 block mb-1">دسته‌بندی‌های سریال * (امکان انتخاب همزمان چند دسته)</label>
                   <div className="grid grid-cols-2 gap-2">
-                    {CATEGORIES.map(c => {
+                    {availableCategories.map(c => {
                       const currentCats = formCategory ? formCategory.split(',').map(x => x.trim()) : [];
                       const isChecked = currentCats.includes(c);
                       return (
@@ -2899,6 +3069,7 @@ export default function SeriesPage({
                     <option value="دوبله فارسی">دوبله فارسی</option>
                     <option value="زبان اصلی">زبان اصلی</option>
                     <option value="دوزبانه (دوبله و زبان اصلی)">دوزبانه (دوبله و زبان اصلی)</option>
+                    <option value="ایرانی (زبان اصلی فارسی)">ایرانی (زبان اصلی فارسی)</option>
                   </select>
                 </div>
 
@@ -2910,21 +3081,7 @@ export default function SeriesPage({
                     onChange={(e) => setFormQuality(e.target.value)}
                     className="w-full h-9 px-2 bg-gray-50 dark:bg-slate-800 rounded-lg text-xs border border-gray-200 dark:border-gray-700 cursor-pointer text-gray-800 dark:text-gray-200"
                   >
-                    {[
-                      '4K BluRay',
-                      '4K HDR',
-                      '4K Web-DL',
-                      '1440p (2K)',
-                      '1080p BluRay',
-                      '1080p Web-DL',
-                      '1080p x265',
-                      '720p HD',
-                      '720p x265',
-                      '576p',
-                      '480p SD',
-                      '360p',
-                      '240p'
-                    ].map(q => (
+                    {availableQualities.map(q => (
                       <option key={q} value={q}>{q}</option>
                     ))}
                   </select>
@@ -3399,6 +3556,15 @@ export default function SeriesPage({
                   >
                     <ListOrdered className="w-3.5 h-3.5" />
                     <span>فصل‌ها و قسمت‌ها</span>
+                  </button>
+                  <button
+                    onClick={() => handleAutoRenameAllSeasonsOfSeries(detailSeries)}
+                    className="p-2.5 bg-amber-600 hover:bg-amber-700 text-white rounded-lg cursor-pointer flex items-center justify-center gap-1.5 font-bold text-xs px-3"
+                    title="تغییر نام فیزیکی تمامی فایل‌های این سریال"
+                    id="btn-series-detail-autorename"
+                  >
+                    <Sparkles className="w-3.5 h-3.5 text-amber-200 animate-pulse" />
+                    <span>تغییر نام منظم فایل‌ها</span>
                   </button>
                   <button
                     onClick={() => { handleExportSingleSeriesJson(detailSeries); }}

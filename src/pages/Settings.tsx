@@ -74,7 +74,6 @@ export default function SettingsPage({ onSettingsChange, onLogout }: SettingsPag
   const [defaultSeriesPrice, setDefaultSeriesPrice] = useState(1500);
   const [defaultQuality, setDefaultQuality] = useState('1080p BluRay');
   const [lanEnabled, setLanEnabled] = useState(true);
-  const [saveInvoiceToUsbEnabled, setSaveInvoiceToUsbEnabled] = useState(true);
 
   // Shop Info
   const [shopName, setShopName] = useState('');
@@ -336,7 +335,6 @@ export default function SettingsPage({ onSettingsChange, onLogout }: SettingsPag
     setDefaultSeriesPrice(s.defaultSeriesPrice !== undefined ? s.defaultSeriesPrice : 1500);
     setDefaultQuality(s.defaultQuality || '1080p BluRay');
     setLanEnabled(s.lanEnabled !== undefined ? s.lanEnabled : true);
-    setSaveInvoiceToUsbEnabled(s.saveInvoiceToUsbEnabled !== undefined ? s.saveInvoiceToUsbEnabled : true);
     setShopName(s.shopName || '');
     setShopAddress(s.shopAddress || '');
     setShopPhone(s.shopPhone || '');
@@ -444,6 +442,23 @@ export default function SettingsPage({ onSettingsChange, onLogout }: SettingsPag
     }
   };
 
+  const handleHardResetDatabase = async () => {
+    const confirm = await showConfirm(
+      'آیا از پاک کردن کامل اطلاعات دیتابیس اطمینان دارید؟',
+      'با تایید این گزینه تمامی فیلم‌ها، سریال‌ها، فاکتورهای فروش، موسیقی‌ها، کاربران و تنظیمات شما به طور کامل و غیرقابل بازگشت حذف خواهند شد. این عمل به منزله بازگشت به تنظیمات کارخانه است.'
+    );
+    if (!confirm) return;
+
+    try {
+      showToast('در حال پاکسازی دیتابیس بومی و محلی...', 'info');
+      await dbService.clearAllDatabase();
+      showAlert('تمامی اطلاعات پایگاه داده با موفقیت حذف شده و به تنظیمات کارخانه بازگشتید.', 'success', 'پاکسازی موفق');
+      window.location.reload();
+    } catch (err: any) {
+      showAlert('خطا در پاکسازی دیتابیس: ' + err.message, 'error');
+    }
+  };
+
   const handleRunCustomSql = async () => {
     if (!customSql.trim()) {
       setSqlError('دستور SQL نمی‌تواند خالی باشد.');
@@ -503,81 +518,6 @@ export default function SettingsPage({ onSettingsChange, onLogout }: SettingsPag
       showAlert('خطای انتقال دیتابیس: ' + err.message, 'error');
     } finally {
       setIsUpdatingDbPath(false);
-    }
-  };
-
-  const handleExportSqliteDbNative = async () => {
-    if (!window.electronAPI || !window.electronAPI.exportSqliteDb) {
-      showAlert('برنامه در شبیه‌ساز تحت وب اجرا شده است. لطفاً از بخش بک‌آپ JSON در پایین برای پشتیبان‌گیری استفاده نمایید.', 'warning');
-      return;
-    }
-    try {
-      if (window.electronAPI.selectDirectory) {
-        showToast('لطفاً پوشه مقصد را برای ذخیره فایل پشتیبان انتخاب کنید...', 'info');
-        const dir = await window.electronAPI.selectDirectory();
-        if (dir) {
-          const today = new Date().toISOString().slice(0, 10).replace(/-/g, '_');
-          const destPath = `${dir}/mediacenter_backup_${today}.db`;
-          const res = await window.electronAPI.exportSqliteDb(destPath);
-          if (res.success) {
-            showAlert(`فایل پشتیبان کامل دیتابیس با موفقیت در مسیر زیر ذخیره شد:\n${destPath}`, 'success', 'پشتیبان‌گیری موفقیت‌آمیز');
-          } else {
-            showAlert('خطا در پشتیبان‌گیری: ' + (res.error || 'خطای ناخواسته'), 'error');
-          }
-        }
-      } else {
-        const path = window.prompt('لطفاً مسیر فیزیکی کامل فایل مقصد (.db) را وارد کنید:', 'D:\\mediacenter_backup.db');
-        if (path) {
-          const res = await window.electronAPI.exportSqliteDb(path);
-          if (res.success) {
-            showAlert('فایل دیتابیس با موفقیت کپی و ذخیره شد.', 'success');
-          } else {
-            showAlert('خطا: ' + res.error, 'error');
-          }
-        }
-      }
-    } catch (err: any) {
-      showAlert('خطا در پشتیبان‌گیری فیزیکی دیتابیس: ' + err.message, 'error');
-    }
-  };
-
-  const handleImportSqliteDbNative = async () => {
-    if (!window.electronAPI || !window.electronAPI.importSqliteDb) {
-      showAlert('برنامه در شبیه‌ساز تحت وب اجرا شده است. لطفاً از بخش بازیابی JSON در پایین برای بارگذاری بک‌آپ استفاده نمایید.', 'warning');
-      return;
-    }
-    const isConfirmed = await showConfirm('هشدار جدی: آیا مطمئن هستید که می‌خواهید کل اطلاعات فعلی دیتابیس را با فایل پشتیبان جایگزین کنید؟ تمامی تغییرات اخیر پاک خواهند شد.', 'بازیابی پایگاه داده');
-    if (!isConfirmed) return;
-
-    try {
-      if (window.electronAPI.selectFile) {
-        showToast('لطفاً فایل پشتیبان (.db) را انتخاب کنید...', 'info');
-        const file = await window.electronAPI.selectFile();
-        if (file) {
-          const res = await window.electronAPI.importSqliteDb(file);
-          if (res.success) {
-            showAlert('بازیابی کامل دیتابیس با موفقیت انجام شد! سیستم جهت بارگذاری اطلاعات جدید مجدداً راه‌اندازی می‌شود.', 'success', 'بازیابی موفقیت‌آمیز').then(() => {
-              window.location.reload();
-            });
-          } else {
-            showAlert('خطا در بازیابی دیتابیس: ' + (res.error || 'خطای غیرمنتظره'), 'error');
-          }
-        }
-      } else {
-        const path = window.prompt('لطفاً مسیر فیزیکی فایل پشتیبان (.db) را به طور دقیق وارد کنید:');
-        if (path) {
-          const res = await window.electronAPI.importSqliteDb(path);
-          if (res.success) {
-            showAlert('بازیابی با موفقیت انجام شد. سیستم بارگذاری مجدد می‌شود.', 'success').then(() => {
-              window.location.reload();
-            });
-          } else {
-            showAlert('خطا: ' + res.error, 'error');
-          }
-        }
-      }
-    } catch (err: any) {
-      showAlert('خطای بازیابی دیتابیس: ' + err.message, 'error');
     }
   };
 
@@ -644,8 +584,7 @@ export default function SettingsPage({ onSettingsChange, onLogout }: SettingsPag
       shopAddress,
       shopPhone,
       shopPhoneSecondary,
-      lanEnabled: !!lanEnabled,
-      saveInvoiceToUsbEnabled: !!saveInvoiceToUsbEnabled
+      lanEnabled: !!lanEnabled
     });
     setSettings(updated);
     onSettingsChange(updated);
@@ -1220,26 +1159,6 @@ export default function SettingsPage({ onSettingsChange, onLogout }: SettingsPag
                   </div>
                 </div>
 
-                {/* Auto Invoice save to USB switcher */}
-                <div className="p-4 bg-emerald-550/5 dark:bg-slate-800/40 border border-emerald-100/40 dark:border-slate-800 rounded-xl space-y-2 mt-4" id="save-invoice-setting-container">
-                  <div className="flex items-center justify-between">
-                    <div>
-                      <strong className="text-xs font-black text-emerald-600 dark:text-emerald-400 block">ذخیره خودکار تصویر فاکتور در فلش مشتری</strong>
-                      <span className="text-[10px] text-gray-400 block mt-0.5">در صورت فعال بودن، تصویر زیبای فاکتور سینمایی هنگام ثبت نهایی به صورت خودکار در فلش مشتری ذخیره می‌شود.</span>
-                    </div>
-                    <label className="relative inline-flex items-center cursor-pointer select-none">
-                      <input 
-                        type="checkbox" 
-                        checked={saveInvoiceToUsbEnabled}
-                        onChange={(e) => setSaveInvoiceToUsbEnabled(e.target.checked)}
-                        className="sr-only peer"
-                        id="save-invoice-usb-toggle"
-                      />
-                      <div className="w-11 h-6 bg-gray-200 dark:bg-slate-700 peer-focus:outline-none rounded-full peer peer-checked:after:-translate-x-5 peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:right-[2px] after:bg-white after:border-gray-300 after:border after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-emerald-600"></div>
-                    </label>
-                  </div>
-                </div>
-
                 {/* Video Player Selection */}
                 <div className="p-4 bg-amber-500/5 dark:bg-slate-800/40 border border-amber-200/40 dark:border-slate-800 rounded-xl space-y-3 mt-4" id="video-player-setting-container">
                   <div className="flex items-center gap-2">
@@ -1423,96 +1342,6 @@ export default function SettingsPage({ onSettingsChange, onLogout }: SettingsPag
                 )}
               </div>
 
-              {/* Backup & Restore Sector */}
-              <div className="p-5 bg-gradient-to-r from-slate-50 to-slate-100/50 dark:from-slate-900/40 dark:to-slate-900/20 border border-slate-200 dark:border-slate-800 rounded-2xl space-y-4">
-                <div>
-                  <h4 className="text-xs font-black text-indigo-600 dark:text-indigo-400">پشتیبان‌گیری و بازیابی پایگاه‌داده (Backup & Restore)</h4>
-                  <p className="text-[10px] text-slate-400 mt-1">با استفاده از ابزارهای زیر می‌توانید از پایگاه‌داده خود پشتیبان (بک‌آپ) تهیه کرده و یا اطلاعات قبلی خود را بازیابی کنید.</p>
-                </div>
-
-                <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                  {/* Export Box */}
-                  <div className="p-4 bg-white dark:bg-slate-950 border border-gray-150 dark:border-slate-800/80 rounded-xl space-y-3 flex flex-col justify-between">
-                    <div>
-                      <div className="flex items-center gap-2 text-indigo-550 dark:text-indigo-400 mb-1.5">
-                        <Download className="w-4 h-4" />
-                        <span className="text-xs font-bold">برون‌بری دیتابیس (Export Backup)</span>
-                      </div>
-                      <p className="text-[10px] text-gray-400 leading-relaxed font-semibold">
-                        یک نسخه پشتیبان کامل از تمامی اطلاعات فیلم‌ها، سریال‌ها، مشتریان، فاکتورها و تنظیمات برنامه تهیه کرده و ذخیره نمایید.
-                      </p>
-                    </div>
-
-                    <div className="space-y-2 pt-2">
-                      {/* Native DB export */}
-                      {sqliteAvailable && (
-                        <button
-                          onClick={handleExportSqliteDbNative}
-                          className="w-full h-9 bg-indigo-600 hover:bg-indigo-700 text-white rounded-lg text-[11px] font-extrabold flex items-center justify-center gap-1.5 transition-colors cursor-pointer shadow-sm"
-                        >
-                          <Database className="w-3.5 h-3.5" />
-                          <span>بک‌آپ فیزیکی دیتابیس بومی (.db)</span>
-                        </button>
-                      )}
-
-                      {/* Universal JSON export */}
-                      <button
-                        onClick={handleExportDB}
-                        className="w-full h-9 bg-slate-100 hover:bg-slate-200 dark:bg-slate-800 dark:hover:bg-slate-750 text-slate-705 dark:text-slate-200 border border-gray-200 dark:border-gray-700 rounded-lg text-[11px] font-extrabold flex items-center justify-center gap-1.5 transition-colors cursor-pointer"
-                      >
-                        <FileText className="w-3.5 h-3.5 text-sky-500" />
-                        <span>بک‌آپ سریع با فرمت عمومی (JSON)</span>
-                      </button>
-                    </div>
-                  </div>
-
-                  {/* Import Box */}
-                  <div className="p-4 bg-white dark:bg-slate-950 border border-gray-150 dark:border-slate-800/80 rounded-xl space-y-3 flex flex-col justify-between">
-                    <div>
-                      <div className="flex items-center gap-2 text-emerald-600 dark:text-emerald-450 mb-1.5">
-                        <Upload className="w-4 h-4" />
-                        <span className="text-xs font-bold">درون‌بری و بازیابی دیتابیس (Import Backup)</span>
-                      </div>
-                      <p className="text-[10px] text-gray-400 leading-relaxed font-semibold">
-                        فایل پشتیبان از پیش ذخیره شده را بارگذاری کنید تا تمامی اطلاعات پایگاه‌داده شما بازیابی و مجدداً لود شود.
-                      </p>
-                    </div>
-
-                    <div className="space-y-2 pt-2">
-                      {/* Native DB Import */}
-                      {sqliteAvailable && (
-                        <button
-                          onClick={handleImportSqliteDbNative}
-                          className="w-full h-9 bg-emerald-600 hover:bg-emerald-700 text-white rounded-lg text-[11px] font-extrabold flex items-center justify-center gap-1.5 transition-colors cursor-pointer shadow-sm"
-                        >
-                          <Database className="w-3.5 h-3.5" />
-                          <span>بازیابی فایل دیتابیس بومی (.db)</span>
-                        </button>
-                      )}
-
-                      {/* Universal JSON Import */}
-                      <label className="w-full h-9 bg-slate-100 hover:bg-slate-200 dark:bg-slate-800 dark:hover:bg-slate-750 text-slate-705 dark:text-slate-200 border border-gray-200 dark:border-gray-700 rounded-lg text-[11px] font-extrabold flex items-center justify-center gap-1.5 transition-colors cursor-pointer select-none">
-                        <Upload className="w-3.5 h-3.5 text-emerald-500" />
-                        <span>بازیابی با فایل بک‌آپ (JSON)</span>
-                        <input
-                          type="file"
-                          accept=".json"
-                          onChange={handleFileImport}
-                          className="hidden"
-                        />
-                      </label>
-                    </div>
-                  </div>
-                </div>
-
-                {/* Show file import success or status messages */}
-                {fileRestoreMessage && (
-                  <div className="p-2.5 bg-indigo-50/50 dark:bg-indigo-950/20 border border-indigo-150 dark:border-indigo-900 rounded-lg text-center">
-                    <span className="text-[10.5px] font-black text-indigo-650 dark:text-indigo-400 animate-pulse">{fileRestoreMessage}</span>
-                  </div>
-                )}
-              </div>
-
               {/* DB Stats Bento Box */}
               <div className="space-y-3">
                 <h4 className="text-xs font-bold text-slate-705 dark:text-slate-300">آمار موجودیت‌های دیتابیس (.db)</h4>
@@ -1554,7 +1383,7 @@ export default function SettingsPage({ onSettingsChange, onLogout }: SettingsPag
               {/* Database quick actions suite */}
               <div className="space-y-3">
                 <h4 className="text-xs font-bold text-slate-705 dark:text-slate-300">کیت ابزارهای نگهداری دیتابیس بومی</h4>
-                <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+                <div className="grid grid-cols-1 sm:grid-cols-4 gap-3">
                   <button 
                     onClick={handleIntegrityCheck}
                     className="flex items-center justify-center gap-2 h-11 bg-slate-100 hover:bg-slate-200 dark:bg-slate-800 dark:hover:bg-slate-705 border border-gray-200 dark:border-gray-700 text-slate-700 dark:text-slate-300 text-xs font-bold rounded-xl cursor-pointer transition-colors"
@@ -1568,7 +1397,7 @@ export default function SettingsPage({ onSettingsChange, onLogout }: SettingsPag
                     className="flex items-center justify-center gap-2 h-11 bg-slate-100 hover:bg-slate-200 dark:bg-slate-800 dark:hover:bg-slate-705 border border-gray-200 dark:border-gray-700 text-slate-700 dark:text-slate-300 text-xs font-bold rounded-xl cursor-pointer transition-colors"
                   >
                     <RefreshCw className="w-4 h-4 text-indigo-500" />
-                    <span>بهینه‌سازی و فشرده‌سازی (Vacuum)</span>
+                    <span>بهینه‌سازی دیتابیس (Vacuum)</span>
                   </button>
 
                   <button 
@@ -1576,7 +1405,15 @@ export default function SettingsPage({ onSettingsChange, onLogout }: SettingsPag
                     className="flex items-center justify-center gap-2 h-11 bg-slate-100 hover:bg-slate-200 dark:bg-slate-800 dark:hover:bg-slate-705 border border-gray-200 dark:border-gray-700 text-slate-700 dark:text-slate-300 text-xs font-bold rounded-xl cursor-pointer transition-colors"
                   >
                     <Database className="w-4 h-4 text-pink-500" />
-                    <span>همگام‌سازی دستی دیتابیس</span>
+                    <span>همگام‌سازی دیتابیس</span>
+                  </button>
+
+                  <button 
+                    onClick={handleHardResetDatabase}
+                    className="flex items-center justify-center gap-2 h-11 bg-red-50 hover:bg-red-100 dark:bg-red-950/25 dark:hover:bg-red-950/40 border border-red-200 dark:border-red-900/40 text-red-650 dark:text-red-400 text-xs font-bold rounded-xl cursor-pointer transition-colors"
+                  >
+                    <Trash2 className="w-4 h-4 text-red-500" />
+                    <span>حذف کل اطلاعات دیتابیس</span>
                   </button>
                 </div>
               </div>
