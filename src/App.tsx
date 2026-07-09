@@ -67,7 +67,21 @@ export default function App() {
   const [showIpDropdown, setShowIpDropdown] = useState(false);
   const [dbPathDisplay, setDbPathDisplay] = useState<string>('دیتابیس: حافظه محلی مرورگر');
   const [activeMediaId, setActiveMediaId] = useState<string | null>(null);
-  const [activeVideo, setActiveVideo] = useState<{ filePath: string; title: string; originPeerIp?: string; subtitlesList?: string[] } | null>(null);
+  const [activeVideo, setActiveVideo] = useState<{ 
+    filePath: string; 
+    title: string; 
+    originPeerIp?: string; 
+    subtitlesList?: string[];
+    playlist?: {
+      id: string;
+      filePath: string;
+      title: string;
+      subtitlesList?: string[];
+      seasonName?: string;
+      episodeName?: string;
+    }[];
+    currentEpisodeId?: string;
+  } | null>(null);
 
   const handleMinimize = () => {
     if (typeof window !== 'undefined' && window.electronAPI && window.electronAPI.minimizeWindow) {
@@ -842,10 +856,12 @@ export default function App() {
           title={activeVideo.title}
           subtitlesList={activeVideo.subtitlesList}
           originPeerIp={activeVideo.originPeerIp}
+          playlist={activeVideo.playlist}
+          currentEpisodeId={activeVideo.currentEpisodeId}
           onClose={() => setActiveVideo(null)}
           onPlayExternal={() => {
             if (window.electronAPI && window.electronAPI.playVideoFile) {
-              window.electronAPI.playVideoFile(activeVideo.filePath, activeVideo.originPeerIp);
+              window.electronAPI.playVideoFile(activeVideo.filePath, activeVideo.originPeerIp, activeVideo.subtitlesList);
             }
           }}
         />

@@ -102,7 +102,9 @@ export default function SeriesPage({
   const [showScanPreviewModal, setShowScanPreviewModal] = useState(false);
 
   // Advanced List and Card View Toggle State
-  const [viewMode, setViewMode] = useState<'card' | 'list'>('card');
+  const [viewMode, setViewMode] = useState<'card' | 'list'>(() => {
+    return dbService.getSettings().defaultViewMode || 'card';
+  });
   const [availableCategories, setAvailableCategories] = useState<string[]>(() => {
     const settings = dbService.getSettings();
     return settings.customCategories && settings.customCategories.length > 0 
@@ -931,6 +933,7 @@ export default function SeriesPage({
     if (settings.customQualities && settings.customQualities.length > 0) {
       setAvailableQualities(settings.customQualities);
     }
+    setViewMode(settings.defaultViewMode || 'card');
   };
 
   // 1. Populate form for Edit
@@ -1072,7 +1075,14 @@ export default function SeriesPage({
     }
   };
 
-  const handlePlayFile = async (filePath: string, originPeerIp?: string, customTitle?: string, subtitlesList?: string[]) => {
+  const handlePlayFile = async (
+    filePath: string,
+    originPeerIp?: string,
+    customTitle?: string,
+    subtitlesList?: string[],
+    playlist?: any[],
+    currentEpisodeId?: string
+  ) => {
     if (!filePath) {
       showAlert('مسیری برای این رسانه ثبت نشده است. ابتدا اطلاعات را ویرایش کرده و آدرس فایل را وارد نمایید.', 'warning');
       return;
@@ -1080,7 +1090,14 @@ export default function SeriesPage({
     const settings = dbService.getSettings();
     if (settings.videoPlayerMode === 'internal') {
       const event = new CustomEvent('play_video_internal', {
-        detail: { filePath, title: customTitle || 'پخش ویدیو', originPeerIp, subtitlesList }
+        detail: {
+          filePath,
+          title: customTitle || 'پخش ویدیو',
+          originPeerIp,
+          subtitlesList,
+          playlist,
+          currentEpisodeId
+        }
       });
       window.dispatchEvent(event);
       return;
@@ -1088,7 +1105,7 @@ export default function SeriesPage({
 
     if (window.electronAPI) {
       try {
-        const res = await window.electronAPI.playVideoFile(filePath, originPeerIp);
+        const res = await window.electronAPI.playVideoFile(filePath, originPeerIp, subtitlesList);
         if (res && !res.success) {
           showAlert('خطا در پخش فایل: ' + res.error, 'error');
         }
@@ -1123,7 +1140,30 @@ export default function SeriesPage({
     const path = episode.videoPath && episode.videoPath.trim() !== '' && episode.videoPath !== 'D:\\Media\\Series\\Video.mkv'
       ? episode.videoPath
       : (series.filePath || '');
-    handlePlayFile(path, series.originPeerIp, `${series.titleFa} - ${episode.name}`, episode.subtitlesList);
+
+    // Build the playlist
+    const playlist: any[] = [];
+    if (series.seasons && series.seasons.length > 0) {
+      series.seasons.forEach((season) => {
+        if (season.episodes && season.episodes.length > 0) {
+          season.episodes.forEach((ep) => {
+            const epPath = ep.videoPath && ep.videoPath.trim() !== '' && ep.videoPath !== 'D:\\Media\\Series\\Video.mkv'
+              ? ep.videoPath
+              : (series.filePath || '');
+            playlist.push({
+              id: ep.id,
+              filePath: epPath,
+              title: `${series.titleFa} - ${season.name} - ${ep.name}`,
+              subtitlesList: ep.subtitlesList || [],
+              seasonName: season.name,
+              episodeName: ep.name
+            });
+          });
+        }
+      });
+    }
+
+    handlePlayFile(path, series.originPeerIp, `${series.titleFa} - ${episode.name}`, episode.subtitlesList, playlist, episode.id);
   };
 
   const handleOpenEpisodeFolder = (episode: Episode, series: Series) => {
@@ -2497,16 +2537,14 @@ export default function SeriesPage({
           <table className="w-full text-right border-collapse text-xs" dir="rtl">
             <thead>
               <tr className="bg-gray-50 dark:bg-[#141d2e] border-b border-gray-200 dark:border-slate-800 text-gray-500 dark:text-gray-400 font-bold">
-                <th className="p-3 w-16 text-center">پوستر</th>
-                
-                <th className="p-3 min-w-[150px]">
+                <th className="p-3 sticky right-0 bg-gray-50 dark:bg-[#141d2e] z-30 shadow-[2px_0_5px_rgba(0,0,0,0.05)] border-l border-gray-150 dark:border-slate-800 min-w-[220px]">
                   <div className="flex flex-col">
                     <button 
                       type="button"
                       onClick={() => { setSortBy('titleFa'); setSortOrder(sortOrder === 'desc' ? 'asc' : 'desc'); }}
                       className="flex items-center gap-1 font-bold text-gray-700 dark:text-gray-300 hover:text-[#38bdf8] transition-colors cursor-pointer"
                     >
-                      <span>عنوان فارسی</span>
+                      <span>عنوان اثر</span>
                       {sortBy === 'titleFa' && (sortOrder === 'desc' ? '▼' : '▲')}
                     </button>
                     <input
@@ -2533,27 +2571,7 @@ export default function SeriesPage({
                       type="text"
                       value={colFilters.titleEn}
                       onChange={(e) => setColFilters(prev => ({ ...prev, titleEn: e.target.value }))}
-                      placeholder="فیلتر..."
-                      className="h-7 bg-white dark:bg-slate-850 border border-gray-200 dark:border-slate-700 rounded text-[10px] px-1.5 mt-1.5 focus:outline-none focus:ring-1 focus:ring-sky-500 font-normal w-full"
-                    />
-                  </div>
-                </th>
-
-                <th className="p-3 min-w-[100px]">
-                  <div className="flex flex-col">
-                    <button 
-                      type="button"
-                      onClick={() => { setSortBy('quality' as any); setSortOrder(sortOrder === 'desc' ? 'asc' : 'desc'); }}
-                      className="flex items-center gap-1 font-bold text-gray-700 dark:text-gray-300 hover:text-[#38bdf8] transition-colors cursor-pointer"
-                    >
-                      <span>کیفیت</span>
-                      {sortBy === ('quality' as any) && (sortOrder === 'desc' ? '▼' : '▲')}
-                    </button>
-                    <input
-                      type="text"
-                      value={colFilters.quality}
-                      onChange={(e) => setColFilters(prev => ({ ...prev, quality: e.target.value }))}
-                      placeholder="فیلتر..."
+                      placeholder="فillter..."
                       className="h-7 bg-white dark:bg-slate-850 border border-gray-200 dark:border-slate-700 rounded text-[10px] px-1.5 mt-1.5 focus:outline-none focus:ring-1 focus:ring-sky-500 font-normal w-full"
                     />
                   </div>
@@ -2613,10 +2631,10 @@ export default function SeriesPage({
                 </th>
 
                 <th className="p-3 min-w-[120px] font-bold text-gray-700 dark:text-gray-300">آخرین قسمت</th>
-                <th className="p-3 min-w-[100px] font-bold text-gray-700 dark:text-gray-300 font-bold text-indigo-600 dark:text-indigo-400">آرشیو شما</th>
-                <th className="p-3 min-w-[110px] font-bold text-gray-700 dark:text-gray-300 font-bold text-emerald-600">قیمت پکیج</th>
+                <th className="p-3 min-w-[100px] font-bold text-gray-700 dark:text-gray-300 text-indigo-600 dark:text-indigo-400">آرشیو شما</th>
+                <th className="p-3 min-w-[110px] font-bold text-gray-700 dark:text-gray-300 text-emerald-600">قیمت پکیج</th>
                 <th className="p-3 min-w-[100px] font-bold text-gray-700 dark:text-gray-300 text-center">وضعیت اتمام</th>
-                <th className="p-3 w-[180px] text-center font-bold text-gray-700 dark:text-gray-300">عملیات</th>
+                <th className="p-3 min-w-[180px] text-center font-bold text-gray-700 dark:text-gray-300 sticky left-0 bg-gray-50 dark:bg-[#141d2e] z-30 shadow-[-2px_0_5px_rgba(0,0,0,0.05)] border-r border-gray-150 dark:border-slate-800">عملیات</th>
               </tr>
             </thead>
             <tbody>
@@ -2627,25 +2645,27 @@ export default function SeriesPage({
                   <tr 
                     key={series.id} 
                     onClick={() => setDetailSeries(series)}
-                    className="border-b border-gray-100 dark:border-slate-800/60 hover:bg-slate-50/55 dark:hover:bg-slate-800/40 cursor-pointer transition-colors"
+                    className="border-b border-gray-100 dark:border-slate-800/60 hover:bg-slate-50/55 dark:hover:bg-slate-800/40 cursor-pointer transition-colors group"
                   >
-                    <td className="p-2 text-center">
-                      <div className="w-10 h-14 rounded overflow-hidden mx-auto shadow-sm">
-                        <img 
-                          src={getSafePosterUrl(series.poster)} 
-                          alt="" 
-                          className="w-full h-full object-cover"
-                          referrerPolicy="no-referrer"
-                        />
+                    <td className="p-2.5 sticky right-0 bg-white dark:bg-[#1e293b] z-20 shadow-[2px_0_5px_rgba(0,0,0,0.05)] border-l border-gray-150 dark:border-slate-800 group-hover:bg-slate-50/55 dark:group-hover:bg-slate-800/40">
+                      <div className="flex items-center gap-3">
+                        <div className="w-10 h-14 rounded overflow-hidden shadow bg-slate-900 shrink-0">
+                          <img 
+                            src={getSafePosterUrl(series.poster)} 
+                            alt="" 
+                            className="w-full h-full object-cover group-hover:scale-105 transition-transform duration-300"
+                            referrerPolicy="no-referrer"
+                          />
+                        </div>
+                        <div className="min-w-0">
+                          <div className="font-bold text-gray-800 dark:text-gray-200 group-hover:text-[#38bdf8] transition-colors truncate">
+                            {series.titleFa}
+                          </div>
+                          <div className="text-[10px] text-gray-400 mt-0.5 line-clamp-1 font-semibold">{series.genres?.join('، ') || ''}</div>
+                        </div>
                       </div>
                     </td>
-                    <td className="p-3 font-bold text-gray-900 dark:text-gray-100">{series.titleFa}</td>
                     <td className="p-3 text-gray-500 font-mono text-[11px]">{series.titleEn}</td>
-                    <td className="p-3">
-                      <span className="bg-slate-100 dark:bg-slate-800 text-slate-700 dark:text-slate-300 text-[10px] px-2 py-0.5 rounded font-mono">
-                        {series.quality}
-                      </span>
-                    </td>
                     <td className="p-3 text-amber-500 font-mono font-bold">★ {toPersianNums(series.imdbRating)}</td>
                     <td className="p-3 font-mono text-gray-600 dark:text-gray-400">{toPersianNums(series.year)}</td>
                     <td className="p-3">
@@ -2675,7 +2695,7 @@ export default function SeriesPage({
                         <span className="text-gray-400 italic text-[10px]">در حال پخش</span>
                       )}
                     </td>
-                    <td className="p-3" onClick={(e) => e.stopPropagation()}>
+                    <td className="p-3 sticky left-0 bg-white dark:bg-[#1e293b] z-20 shadow-[-2px_0_5px_rgba(0,0,0,0.05)] border-r border-gray-150 dark:border-slate-800 group-hover:bg-slate-50/55 dark:group-hover:bg-slate-800/40" onClick={(e) => e.stopPropagation()}>
                       <div className="flex items-center justify-center gap-1.5">
                         <button
                           onClick={(e) => handleOpenSale(series, e)}

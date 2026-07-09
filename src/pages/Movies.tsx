@@ -98,7 +98,9 @@ export default function Movies({
   const [sortOrder, setSortOrder] = useState<'desc' | 'asc'>('desc');
   const [showFilters, setShowFilters] = useState(false);
   const [editingMovie, setEditingMovie] = useState<Movie | null>(null);
-  const [viewMode, setViewMode] = useState<'card' | 'list'>('card');
+  const [viewMode, setViewMode] = useState<'card' | 'list'>(() => {
+    return dbService.getSettings().defaultViewMode || 'card';
+  });
   const [colFilters, setColFilters] = useState<Record<string, string>>({
     titleFa: '',
     titleEn: '',
@@ -593,7 +595,7 @@ export default function Movies({
     dbService.updateSettings({ customCategories: updated });
     
     const presetsCategories = ['ایرانی', 'خارجی', 'انیمیشن', 'کره‌ای', 'هندی', 'متفرقه'];
-    setAvailableCategories([...presetsCategories, ...updated]);
+    setAvailableCategories(Array.from(new Set([...presetsCategories, ...updated])));
     setFormCategory(name.trim());
     alert(`دسته‌بندی "${name.trim()}" با موفقیت اضافه شد.`);
   };
@@ -675,7 +677,7 @@ export default function Movies({
         if (!allC.includes(parsed.category)) {
           const updated = [...customC, parsed.category];
           dbService.updateSettings({ customCategories: updated });
-          setAvailableCategories([...presetC, ...updated]);
+          setAvailableCategories(Array.from(new Set([...presetC, ...updated])));
         }
         setFormCategory(parsed.category);
       }
@@ -813,11 +815,13 @@ export default function Movies({
 
     const presetC = ['ایرانی', 'خارجی', 'انیمیشن', 'کره‌ای', 'هندی', 'متفرقه'];
     const customC = settings.customCategories || [];
-    setAvailableCategories([...presetC, ...customC]);
+    setAvailableCategories(Array.from(new Set([...presetC, ...customC])));
 
     const presetQ = ['1080p Web-DL', '1080p BluRay', '4K UHD Bluray', '720p HD'];
     const customQ = settings.customQualities || [];
-    setAvailableQualities([...presetQ, ...customQ]);
+    setAvailableQualities(Array.from(new Set([...presetQ, ...customQ])));
+
+    setViewMode(settings.defaultViewMode || 'card');
   };
 
   // Populate form with film details for editing
@@ -1625,10 +1629,10 @@ export default function Movies({
                   <h3 className="text-xs font-bold text-gray-900 dark:text-gray-100 group-hover:text-indigo-600 dark:group-hover:text-indigo-400 transition-colors truncate" title={movie.titleFa}>
                     {movie.titleFa}
                   </h3>
-                  <p className="text-[10px] text-gray-400 font-mono truncate mt-0.5">{movie.titleEn}</p>
+                  <p className="text-[10px] text-gray-450 font-mono truncate mt-0.5">{movie.titleEn}</p>
                   
                   <div className="flex items-center gap-1.5 flex-wrap mt-2">
-                    <span className="text-[9px] bg-gray-50 text-gray-400 border border-gray-100 dark:bg-gray-800/50 dark:text-gray-300 dark:border-gray-700 px-1 py-0.5 rounded font-mono font-medium shrink-0">
+                    <span className="text-[9px] bg-gray-50 text-gray-450 border border-gray-100 dark:bg-gray-800/50 dark:text-gray-300 dark:border-gray-700 px-1 py-0.5 rounded font-mono font-medium shrink-0">
                       {movie.quality}
                     </span>
                     <span className="text-[9px] bg-gray-50 text-gray-455 border border-gray-100 dark:bg-gray-800/10 dark:text-gray-300 dark:border-gray-700 px-1 py-0.5 rounded truncate max-w-[90px]">
@@ -1654,7 +1658,7 @@ export default function Movies({
               </div>
 
               {/* Operations Footer (Edit/Delete icons) */}
-              <div className="bg-gray-50 dark:bg-[#1a2236]/30 px-3 py-1.5 flex justify-between items-center border-t border-gray-100 dark:border-slate-800" id={`movie-footer-${movie.id}`}>
+              <div className="bg-gray-50 dark:bg-[#1a2236]/30 px-3 py-1.5 flex justify-between items-center border-t border-gray-150 dark:border-slate-800" id={`movie-footer-${movie.id}`}>
                 {movie.officialSite ? (
                   <button
                     onClick={(e) => { e.stopPropagation(); setActiveBrowserUrl(movie.officialSite); }}
@@ -1670,7 +1674,7 @@ export default function Movies({
                 <div className="flex gap-1.5">
                   <button
                     onClick={(e) => handleOpenEdit(movie, e)}
-                    className="p-1 text-gray-405 hover:text-indigo-600 transition-colors"
+                    className="p-1 text-gray-455 hover:text-indigo-650 transition-colors"
                     title="ویرایش فیلم"
                     id={`edit-movie-${movie.id}`}
                   >
@@ -1678,7 +1682,7 @@ export default function Movies({
                   </button>
                   <button
                     onClick={(e) => handleDeleteMovie(movie.id, e)}
-                    className="p-1 text-gray-405 hover:text-red-600 transition-colors"
+                    className="p-1 text-gray-455 hover:text-red-650 transition-colors"
                     title="حذف فیلم"
                     id={`delete-movie-${movie.id}`}
                   >
@@ -1691,19 +1695,17 @@ export default function Movies({
         </div>
       ) : (
         <div className="overflow-x-auto bg-white dark:bg-[#1e293b] border border-gray-150 dark:border-slate-800 rounded-xl shadow-sm animate-scaleIn" id="movies-list-table-container">
-          <table className="w-full text-right border-collapse text-xs" dir="rtl">
+          <table className="w-full text-right border-collapse text-xs table-auto" dir="rtl">
             <thead>
               <tr className="bg-gray-50 dark:bg-[#141d2e] border-b border-gray-200 dark:border-slate-800 text-gray-500 dark:text-gray-400 font-bold">
-                <th className="p-3 w-16 text-center">پوستر</th>
-                
-                <th className="p-3 min-w-[150px]">
+                <th className="p-3 sticky right-0 bg-gray-50 dark:bg-[#141d2e] z-30 shadow-[2px_0_5px_rgba(0,0,0,0.05)] border-l border-gray-150 dark:border-slate-800 min-w-[220px]">
                   <div className="flex flex-col">
                     <button 
                       type="button"
                       onClick={() => { setSortBy('titleFa'); setSortOrder(sortOrder === 'desc' ? 'asc' : 'desc'); }}
                       className="flex items-center gap-1 font-bold text-gray-700 dark:text-gray-300 hover:text-indigo-650 dark:hover:text-indigo-400 transition-colors cursor-pointer"
                     >
-                      <span>عنوان فارسی</span>
+                      <span>عنوان اثر</span>
                       {sortBy === 'titleFa' && (sortOrder === 'desc' ? '▼' : '▲')}
                     </button>
                     <input
@@ -1730,26 +1732,6 @@ export default function Movies({
                       type="text"
                       value={colFilters.titleEn}
                       onChange={(e) => setColFilters(prev => ({ ...prev, titleEn: e.target.value }))}
-                      placeholder="فیلتر..."
-                      className="h-7 bg-white dark:bg-slate-850 border border-gray-200 dark:border-slate-700 rounded text-[10px] px-1.5 mt-1.5 focus:outline-none focus:ring-1 focus:ring-indigo-500 font-normal w-full"
-                    />
-                  </div>
-                </th>
-
-                <th className="p-3 w-28">
-                  <div className="flex flex-col">
-                    <button 
-                      type="button"
-                      onClick={() => { setSortBy('quality'); setSortOrder(sortOrder === 'desc' ? 'asc' : 'desc'); }}
-                      className="flex items-center gap-1 font-bold text-gray-700 dark:text-gray-300 hover:text-indigo-650 dark:hover:text-indigo-400 transition-colors cursor-pointer"
-                    >
-                      <span>کیفیت</span>
-                      {sortBy === 'quality' && (sortOrder === 'desc' ? '▼' : '▲')}
-                    </button>
-                    <input
-                      type="text"
-                      value={colFilters.quality}
-                      onChange={(e) => setColFilters(prev => ({ ...prev, quality: e.target.value }))}
                       placeholder="فیلتر..."
                       className="h-7 bg-white dark:bg-slate-850 border border-gray-200 dark:border-slate-700 rounded text-[10px] px-1.5 mt-1.5 focus:outline-none focus:ring-1 focus:ring-indigo-500 font-normal w-full"
                     />
@@ -1822,7 +1804,7 @@ export default function Movies({
                   </div>
                 </th>
 
-                <th className="p-3 w-32 font-bold text-gray-700 dark:text-gray-300 text-center">عملیات مدیریت و فروش</th>
+                <th className="p-3 min-w-[200px] font-bold text-gray-700 dark:text-gray-300 text-center sticky left-0 bg-gray-50 dark:bg-[#141d2e] z-30 shadow-[-2px_0_5px_rgba(0,0,0,0.05)] border-r border-gray-150 dark:border-slate-800">عملیات مدیریت و فروش</th>
               </tr>
             </thead>
             <tbody>
@@ -1836,32 +1818,27 @@ export default function Movies({
                     className="border-b border-gray-150 dark:border-slate-800 hover:bg-slate-50 dark:hover:bg-slate-800/50 transition-colors cursor-pointer group"
                     id={`movie-row-${movie.id}`}
                   >
-                    <td className="p-2.5 text-center">
-                      <div className="w-10 h-14 rounded overflow-hidden shadow bg-slate-900 mx-auto">
-                        <img 
-                          src={getSafePosterUrl(movie.poster)} 
-                          alt={movie.titleFa}
-                          className="w-full h-full object-cover group-hover:scale-105 transition-transform duration-300"
-                          referrerPolicy="no-referrer"
-                        />
+                    <td className="p-2.5 sticky right-0 bg-white dark:bg-[#1e293b] z-20 shadow-[2px_0_5px_rgba(0,0,0,0.05)] border-l border-gray-150 dark:border-slate-800 group-hover:bg-slate-50 dark:group-hover:bg-slate-800/50">
+                      <div className="flex items-center gap-3">
+                        <div className="w-10 h-14 rounded overflow-hidden shadow bg-slate-900 shrink-0">
+                          <img 
+                            src={getSafePosterUrl(movie.poster)} 
+                            alt={movie.titleFa}
+                            className="w-full h-full object-cover group-hover:scale-105 transition-transform duration-300"
+                            referrerPolicy="no-referrer"
+                          />
+                        </div>
+                        <div className="min-w-0">
+                          <div className="font-bold text-gray-800 dark:text-gray-200 group-hover:text-indigo-650 dark:group-hover:text-indigo-400 transition-colors truncate">
+                            {movie.titleFa}
+                          </div>
+                          <div className="text-[10px] text-gray-400 mt-0.5 line-clamp-1 font-semibold">{movie.genres.join('، ')}</div>
+                        </div>
                       </div>
-                    </td>
-
-                    <td className="p-2.5">
-                      <div className="font-bold text-gray-800 dark:text-gray-200 group-hover:text-indigo-650 dark:group-hover:text-indigo-400 transition-colors">
-                        {movie.titleFa}
-                      </div>
-                      <div className="text-[10px] text-gray-450 mt-0.5 line-clamp-1 font-semibold">{movie.genres.join('، ')}</div>
                     </td>
 
                     <td className="p-2.5">
                       <div className="font-mono text-gray-600 dark:text-gray-400 truncate max-w-[180px]">{movie.titleEn}</div>
-                    </td>
-
-                    <td className="p-2.5">
-                      <span className="bg-indigo-50 dark:bg-indigo-950/40 text-indigo-650 dark:text-indigo-400 border border-indigo-100 dark:border-indigo-900/30 text-[10px] font-bold px-1.5 py-0.5 rounded">
-                        {movie.quality}
-                      </span>
                     </td>
 
                     <td className="p-2.5">
@@ -1884,7 +1861,7 @@ export default function Movies({
                       <div className="truncate max-w-[120px]">{movie.director || '-'}</div>
                     </td>
 
-                    <td className="p-2.5 text-center" onClick={(e) => e.stopPropagation()}>
+                    <td className="p-2.5 text-center sticky left-0 bg-white dark:bg-[#1e293b] z-20 shadow-[-2px_0_5px_rgba(0,0,0,0.05)] border-r border-gray-150 dark:border-slate-800 group-hover:bg-slate-50 dark:group-hover:bg-slate-800/50" onClick={(e) => e.stopPropagation()}>
                       <div className="flex items-center justify-center gap-1.5">
                         {/* Play Video Button */}
                         <button
@@ -1899,7 +1876,7 @@ export default function Movies({
                         {/* Open Folder Button */}
                         <button
                           onClick={() => handleOpenFolder(movie.filePath, movie.originPeerIp)}
-                          className="p-1.5 text-gray-405 hover:text-blue-500 border border-gray-250 dark:border-gray-800 rounded-md hover:bg-white dark:hover:bg-slate-850 transition-colors"
+                          className="p-1.5 text-gray-455 hover:text-blue-500 border border-gray-250 dark:border-gray-800 rounded-md hover:bg-white dark:hover:bg-slate-850 transition-colors"
                           title="باز کردن مسیر فایل"
                           id={`btn-movie-folder-${movie.id}`}
                         >

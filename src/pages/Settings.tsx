@@ -40,7 +40,9 @@ import {
   Plus,
   FileText,
   Server,
-  Play
+  Play,
+  Grid,
+  List
 } from 'lucide-react';
 
 interface SettingsPageProps {
@@ -74,6 +76,7 @@ export default function SettingsPage({ onSettingsChange, onLogout }: SettingsPag
   const [defaultSeriesPrice, setDefaultSeriesPrice] = useState(1500);
   const [defaultQuality, setDefaultQuality] = useState('1080p BluRay');
   const [lanEnabled, setLanEnabled] = useState(true);
+  const [defaultViewMode, setDefaultViewMode] = useState<'card' | 'list'>('card');
 
   // Shop Info
   const [shopName, setShopName] = useState('');
@@ -335,6 +338,7 @@ export default function SettingsPage({ onSettingsChange, onLogout }: SettingsPag
     setDefaultSeriesPrice(s.defaultSeriesPrice !== undefined ? s.defaultSeriesPrice : 1500);
     setDefaultQuality(s.defaultQuality || '1080p BluRay');
     setLanEnabled(s.lanEnabled !== undefined ? s.lanEnabled : true);
+    setDefaultViewMode(s.defaultViewMode || 'card');
     setShopName(s.shopName || '');
     setShopAddress(s.shopAddress || '');
     setShopPhone(s.shopPhone || '');
@@ -584,7 +588,8 @@ export default function SettingsPage({ onSettingsChange, onLogout }: SettingsPag
       shopAddress,
       shopPhone,
       shopPhoneSecondary,
-      lanEnabled: !!lanEnabled
+      lanEnabled: !!lanEnabled,
+      defaultViewMode
     });
     setSettings(updated);
     onSettingsChange(updated);
@@ -1137,6 +1142,38 @@ export default function SettingsPage({ onSettingsChange, onLogout }: SettingsPag
                     <option value="1080p x265">1080p x265</option>
                     <option value="720p HD">720p HD</option>
                   </select>
+                </div>
+
+                {/* Default View Mode Setting */}
+                <div className="space-y-1.5 pt-1" id="default-viewmode-setting-container">
+                  <label className="text-[11px] font-black text-indigo-500 block">نمای پیش‌فرض فیلم و سریال‌ها</label>
+                  <p className="text-[10px] text-gray-400 mt-0.5">مشخص کنید که کاتالوگ فیلم‌ها و سریال‌ها به صورت پیش‌فرض با کدام نما نمایش داده شود.</p>
+                  <div className="grid grid-cols-2 gap-3">
+                    <button
+                      type="button"
+                      onClick={() => setDefaultViewMode('card')}
+                      className={`h-10 rounded-lg font-bold text-xs border transition-all cursor-pointer flex items-center justify-center gap-2 ${
+                        defaultViewMode === 'card'
+                          ? 'bg-indigo-600 border-indigo-600 text-white shadow-sm'
+                          : 'bg-white dark:bg-slate-800 border-gray-200 dark:border-gray-700 text-gray-600 dark:text-gray-300 hover:bg-gray-50'
+                      }`}
+                    >
+                      <Grid className="w-3.5 h-3.5" />
+                      <span>نمای کارتی (پیش‌فرض)</span>
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => setDefaultViewMode('list')}
+                      className={`h-10 rounded-lg font-bold text-xs border transition-all cursor-pointer flex items-center justify-center gap-2 ${
+                        defaultViewMode === 'list'
+                          ? 'bg-indigo-600 border-indigo-600 text-white shadow-sm'
+                          : 'bg-white dark:bg-slate-800 border-gray-200 dark:border-gray-700 text-gray-600 dark:text-gray-300 hover:bg-gray-50'
+                      }`}
+                    >
+                      <List className="w-3.5 h-3.5" />
+                      <span>نمای لیستی</span>
+                    </button>
+                  </div>
                 </div>
 
                 {/* LAN sharing switcher */}

@@ -19,6 +19,7 @@ import {
   FolderOpen, 
   Trash2, 
   Play, 
+  Pause,
   X, 
   CheckCircle2, 
   FileText, 
@@ -149,6 +150,7 @@ export default function CartBar({
     speedMbs: number;
     completed: boolean;
     error?: string;
+    paused?: boolean;
   }>>({});
 
   // 2. Query free space of selected drive
@@ -205,6 +207,34 @@ export default function CartBar({
     showToast('عملیات کپی لغو شد.', 'info');
   };
 
+  const handlePauseCopy = async (itemId: string) => {
+    if (window.electronAPI && window.electronAPI.pauseCopy) {
+      await window.electronAPI.pauseCopy(itemId);
+    }
+    setCopyProgress(prev => ({
+      ...prev,
+      [itemId]: {
+        ...prev[itemId],
+        paused: true
+      }
+    }));
+    showToast('کپی موقتاً متوقف شد.', 'info');
+  };
+
+  const handleResumeCopy = async (itemId: string) => {
+    if (window.electronAPI && window.electronAPI.resumeCopy) {
+      await window.electronAPI.resumeCopy(itemId);
+    }
+    setCopyProgress(prev => ({
+      ...prev,
+      [itemId]: {
+        ...prev[itemId],
+        paused: false
+      }
+    }));
+    showToast('کپی از سر گرفته شد.', 'info');
+  };
+
   useEffect(() => {
     if (window.electronAPI && window.electronAPI.onCopyProgress) {
       window.electronAPI.onCopyProgress((data) => {
@@ -228,7 +258,8 @@ export default function CartBar({
               totalBytes: data.totalBytes,
               speedMbs: data.speedMbs,
               completed: !!displayCompleted,
-              error: data.error
+              error: data.error,
+              paused: data.paused
             }
           };
         });
@@ -520,6 +551,8 @@ export default function CartBar({
     setIsCopyingAll(true);
     showToast('شروع کپی صف‌به‌صف تمامی اقلام به فلش دیسک مشتری...', 'info');
     
+    const failedItems: string[] = [];
+    
     for (const item of cart) {
       if (copyProgress[item.id]?.completed) {
         continue;
@@ -527,15 +560,23 @@ export default function CartBar({
       
       const success = await copyCartItemToUsb(item);
       if (!success) {
-        const resume = await showConfirm(`خطایی در کپی "${item.mediaTitle}" رخ داد. آیا مایلید کپی سایر اقلام باقی‌مانده را ادامه دهید؟`, 'خطا در کپی');
-        if (!resume) {
-          break;
-        }
+        failedItems.push(item.mediaTitle);
       }
     }
     
     setIsCopyingAll(false);
-    showToast('عملیات کپی کلی صف تمام شد.', 'success');
+    
+    if (failedItems.length > 0) {
+      showAlert(
+        `عملیات کپی کلی به پایان رسید. با این حال، کپی تعداد ${toPersianNums(failedItems.length)} فیلم/سریال با خطا مواجه شد:\n\n` + 
+        failedItems.map((title, idx) => `${toPersianNums(idx + 1)}. ${title}`).join('\n') +
+        `\n\nلطفاً اتصال دیسک یا فضای ذخیره‌سازی را بررسی کرده و مجدداً تلاش کنید.`, 
+        'error', 
+        'لیست فایلهای کپی‌نشده'
+      );
+    } else {
+      showToast('عملیات کپی کلی صف با موفقیت به پایان رسید.', 'success');
+    }
   };
 
   const handleSelectDrive = async () => {
@@ -1238,8 +1279,8 @@ export default function CartBar({
                                       </>
                                     ) : progressInfo && !progressInfo.completed && !progressInfo.error ? (
                                       <>
-                                        <RefreshCw className="w-3.5 h-3.5 animate-spin text-white" />
-                                        <span>در حال کپی... (%{toPersianNums(progressInfo.progress)})</span>
+                                        <RefreshCw className={`w-3.5 h-3.5 text-white ${progressInfo.paused ? '' : 'animate-spin'}`} />
+                                        <span>{progressInfo.paused ? `متوقف موقت (%${toPersianNums(progressInfo.progress)})` : `در حال کپی... (%${toPersianNums(progressInfo.progress)})`}</span>
                                       </>
                                     ) : (
                                       <>
@@ -1247,6 +1288,24 @@ export default function CartBar({
                                         <span>کپی به فلش</span>
                                       </>
                                     )}
+                                  </button>
+                                )}
+
+                                {/* Pause / Resume Button */}
+                                {progressInfo && !progressInfo.completed && !progressInfo.error && (
+                                  <button
+                                    type="button"
+                                    onClick={() => {
+                                      if (progressInfo.paused) {
+                                        handleResumeCopy(item.id);
+                                      } else {
+                                        handlePauseCopy(item.id);
+                                      }
+                                    }}
+                                    className={`p-1.5 rounded-lg transition-colors cursor-pointer flex items-center justify-center ${progressInfo.paused ? 'bg-amber-50 text-amber-600 dark:bg-amber-950/40 dark:hover:bg-amber-950/60 animate-pulse' : 'bg-indigo-50 text-indigo-600 dark:bg-indigo-950/40 dark:hover:bg-indigo-950/60'}`}
+                                    title={progressInfo.paused ? "ادامه عملیات کپی" : "توقف موقت عملیات کپی"}
+                                  >
+                                    {progressInfo.paused ? <Play className="w-3.5 h-3.5 fill-current" /> : <Pause className="w-3.5 h-3.5 fill-current" />}
                                   </button>
                                 )}
 
@@ -1283,10 +1342,44 @@ export default function CartBar({
                                     ) : progressInfo.completed ? (
                                       <span className="text-emerald-500 font-extrabold">کپی با موفقیت تکمیل شد</span>
                                     ) : (
-                                      <>
-                                        <span className="font-mono text-[9px] text-indigo-400">{toPersianNums(progressInfo.speedMbs.toFixed(1))} MB/s</span>
-                                        <span>{toPersianNums(Math.round(progressInfo.bytesCopied / (1024 * 1024)))} / {toPersianNums(Math.round(progressInfo.totalBytes / (1024 * 1024)))} MB</span>
-                                      </>
+                                      (() => {
+                                        const indexInfo = currentCopyIndicesRef.current[item.id];
+                                        const bytesRemaining = progressInfo.totalBytes - progressInfo.bytesCopied;
+                                        const speedBytesPerSec = progressInfo.speedMbs * 1024 * 1024;
+                                        let etaStr = '';
+                                        
+                                        if (progressInfo.paused) {
+                                          etaStr = 'متوقف شده';
+                                        } else if (speedBytesPerSec > 0 && bytesRemaining > 0) {
+                                          const etaSeconds = bytesRemaining / speedBytesPerSec;
+                                          if (etaSeconds < 60) {
+                                            etaStr = `باقی‌مانده: ${toPersianNums(Math.round(etaSeconds))} ثانیه`;
+                                          } else {
+                                            const mins = Math.floor(etaSeconds / 60);
+                                            const secs = Math.round(etaSeconds % 60);
+                                            etaStr = `باقی‌مانده: ${toPersianNums(mins)} دقیقه و ${toPersianNums(secs)} ثانیه`;
+                                          }
+                                        } else if (bytesRemaining > 0) {
+                                          etaStr = 'محاسبه زمان باقی‌مانده...';
+                                        }
+
+                                        return (
+                                          <div className="flex flex-col text-right w-full">
+                                            <div className="flex justify-between items-center text-[9px] text-indigo-400 font-bold font-mono">
+                                              <span>{toPersianNums(progressInfo.speedMbs.toFixed(1))} MB/s</span>
+                                              {etaStr && <span className="text-gray-400 font-sans text-[8.5px]">{etaStr}</span>}
+                                            </div>
+                                            <div className="flex justify-between items-center text-[8.5px] text-gray-500 mt-0.5 font-sans">
+                                              <span>{toPersianNums(Math.round(progressInfo.bytesCopied / (1024 * 1024)))} / {toPersianNums(Math.round(progressInfo.totalBytes / (1024 * 1024)))} MB</span>
+                                              {indexInfo && indexInfo.total > 1 && (
+                                                <span className="text-indigo-400 font-bold text-[8px]">
+                                                  فایل {toPersianNums(indexInfo.current + 1)} از {toPersianNums(indexInfo.total)}
+                                                </span>
+                                              )}
+                                            </div>
+                                          </div>
+                                        );
+                                      })()
                                     )}
                                   </div>
                                   <div className="w-full bg-gray-200 dark:bg-slate-800 rounded-full h-1.5 overflow-hidden">

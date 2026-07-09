@@ -171,6 +171,7 @@ export interface AppSettings {
   tmdbIncludeAdult?: boolean;
   videoPlayerMode?: 'internal' | 'external';
   saveInvoiceToUsbEnabled?: boolean;
+  defaultViewMode?: 'card' | 'list';
 }
 
 declare global {
@@ -180,7 +181,7 @@ declare global {
       maximizeWindow: () => Promise<boolean>;
       closeWindow: () => Promise<boolean>;
       openFileInExplorer: (filepath: string, originPeerIp?: string) => Promise<{ success: boolean; error?: string }>;
-      playVideoFile: (filepath: string, originPeerIp?: string) => Promise<{ success: boolean; error?: string }>;
+      playVideoFile: (filepath: string, originPeerIp?: string, subtitlesList?: string[]) => Promise<{ success: boolean; error?: string }>;
       openFolderDirectory: (dirpath: string, originPeerIp?: string) => Promise<{ success: boolean; error?: string }>;
       selectFile: (filters?: { name: string; extensions: string[] }[]) => Promise<string | null>;
       selectPoster: () => Promise<string | null>;
@@ -212,10 +213,12 @@ declare global {
       readTextFile?: (filepath: string) => Promise<{ success: boolean; content?: string; error?: string }>;
       exportSqliteDb?: (destPath: string) => Promise<{ success: boolean; error?: string }>;
       importSqliteDb?: (srcPath: string) => Promise<{ success: boolean; error?: string }>;
-      onCopyProgress?: (callback: (data: { id: string; progress: number; bytesCopied: number; totalBytes: number; speedMbs: number; completed?: boolean; error?: string }) => void) => void;
+      onCopyProgress?: (callback: (data: { id: string; progress: number; bytesCopied: number; totalBytes: number; speedMbs: number; completed?: boolean; error?: string; paused?: boolean }) => void) => void;
       onDownloadProgress?: (callback: (data: any) => void) => void;
       onDownloadTaskProgress?: (callback: (data: { id: string; progress: number; bytesWritten: number; totalBytes: number; speedMbs: number; currentSpeedMbs?: number; timeElapsed?: number; completed?: boolean; error?: string }) => void) => void;
       cancelCopy?: (id: string) => Promise<{ success: boolean; error?: string }>;
+      pauseCopy?: (id: string) => Promise<{ success: boolean; error?: string }>;
+      resumeCopy?: (id: string) => Promise<{ success: boolean; error?: string }>;
       saveInvoiceImage?: (destDir: string, dataUrl: string, filename: string) => Promise<{ success: boolean; error?: string }>;
       windowControl?: any;
       getDbStats?: any;

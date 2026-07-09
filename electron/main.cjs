@@ -224,49 +224,93 @@ ipcMain.handle('open-file-in-explorer', async (event, filepath, originPeerIp) =>
   }
 });
 
-ipcMain.handle('play-video-file', async (event, filepath, originPeerIp) => {
+ipcMain.handle('play-video-file', async (event, filepath, originPeerIp, subtitlesList) => {
   try {
     if (!filepath) return { success: false, error: 'No filepath provided' };
     
-    if (originPeerIp && originPeerIp.trim()) {
-      const peerIp = originPeerIp.trim();
-      const unc = getUncPath(filepath, peerIp);
-      if (unc) {
-        const pathsToTry = [];
-        if (unc.pathB) pathsToTry.push(unc.pathB);
-        pathsToTry.push(unc.pathA);
-        pathsToTry.push(unc.pathC);
-        
-        for (const uncPath of pathsToTry) {
-          if (fs.existsSync(uncPath)) {
-            const err = await shell.openPath(uncPath);
-            if (!err) return { success: true, resolvedPath: uncPath };
-          }
-        }
-        
-        // Direct shell trigger: spawn 'start' process to play video file.
-        // This forces Windows default player launch and pops credentials if needed.
-        const { exec } = require('child_process');
-        for (const uncPath of pathsToTry) {
-          try {
-            exec(`start "" "${uncPath}"`);
-          } catch (e) {}
-        }
-        return { success: true, resolvedPath: pathsToTry[0] };
+    // Check if we can play with MPV (if available in system PATH or common directories)
+    const { exec } = require('child_process');
+    const path = require('path');
+    const fs = require('fs');
+
+    const firstSub = subtitlesList && subtitlesList.length > 0 ? subtitlesList[0] : null;
+    const commonMpvPaths = [
+      'mpv', // system path
+      'C:\\Program Files\\mpv\\mpv.exe',
+      'C:\\mpv\\mpv.exe',
+      'C:\\Program Files (x86)\\mpv\\mpv.exe',
+      path.join(process.resourcesPath, 'mpv.exe'),
+      path.join(__dirname, 'mpv.exe'),
+    ];
+
+    let foundMpv = null;
+    for (const mpvPath of commonMpvPaths) {
+      if (mpvPath === 'mpv') continue;
+      if (fs.existsSync(mpvPath)) {
+        foundMpv = mpvPath;
+        break;
       }
-      
-      // Secondary fallback: Stream over simple HTTP server running on peer port 3300
-      const downloadUrl = `http://${peerIp}:3300/api/lan/download?path=${encodeURIComponent(filepath)}`;
-      const err = await shell.openExternal(downloadUrl);
-      if (err) throw err;
-      return { success: true, streamUrl: downloadUrl };
     }
-    
-    const err = await shell.openPath(filepath);
-    if (err) {
-      return { success: false, error: err };
+
+    const targetMpv = foundMpv || 'mpv';
+    let finalCommand = `"${targetMpv}" "${filepath}"`;
+    if (firstSub) {
+      finalCommand += ` --sub-file="${firstSub}"`;
     }
-    return { success: true };
+
+    return new Promise((resolve) => {
+      exec(finalCommand, async (err) => {
+        if (err && !foundMpv) {
+          // Fallback to normal behavior if mpv launch failed (or not found)
+          if (originPeerIp && originPeerIp.trim()) {
+            const peerIp = originPeerIp.trim();
+            const unc = getUncPath(filepath, peerIp);
+            if (unc) {
+              const pathsToTry = [];
+              if (unc.pathB) pathsToTry.push(unc.pathB);
+              pathsToTry.push(unc.pathA);
+              pathsToTry.push(unc.pathC);
+              
+              for (const uncPath of pathsToTry) {
+                if (fs.existsSync(uncPath)) {
+                  const openErr = await shell.openPath(uncPath);
+                  if (!openErr) {
+                    resolve({ success: true, resolvedPath: uncPath });
+                    return;
+                  }
+                }
+              }
+              
+              for (const uncPath of pathsToTry) {
+                try {
+                  exec(`start "" "${uncPath}"`);
+                } catch (e) {}
+              }
+              resolve({ success: true, resolvedPath: pathsToTry[0] });
+              return;
+            }
+            
+            const downloadUrl = `http://${peerIp}:3300/api/lan/download?path=${encodeURIComponent(filepath)}`;
+            const openErr = await shell.openExternal(downloadUrl);
+            if (openErr) {
+              resolve({ success: false, error: openErr.message });
+            } else {
+              resolve({ success: true, streamUrl: downloadUrl });
+            }
+            return;
+          }
+
+          const openErr = await shell.openPath(filepath);
+          if (openErr) {
+            resolve({ success: false, error: openErr });
+          } else {
+            resolve({ success: true });
+          }
+        } else {
+          resolve({ success: true, playedWithMpv: true });
+        }
+      });
+    });
   } catch (err) {
     return { success: false, error: err.message };
   }
@@ -2509,26 +2553,47 @@ ipcMain.handle('download-lan-file', async (event, url, destPath) => {
   });
 });
 
-// Active copy streams map for cancellation support
-const activeCopyStreams = new Map();
+// Active copy workers map for cancellation and pause support
+const activeCopyWorkers = new Map();
 
 // IPC handle for canceling an ongoing file copy
 ipcMain.handle('cancel-copy', async (event, id) => {
-  const active = activeCopyStreams.get(id);
-  if (active) {
+  const worker = activeCopyWorkers.get(id);
+  if (worker) {
     try {
-      active.readStream.destroy();
-      active.writeStream.destroy();
-      activeCopyStreams.delete(id);
-      
-      // Allow some milliseconds for the file handles to release
-      setTimeout(() => {
-        if (fs.existsSync(active.destPath)) {
-          try { fs.unlinkSync(active.destPath); } catch (ex) {}
-        }
-      }, 150);
-      
-      console.log(`Successfully canceled copying for ID: ${id}`);
+      worker.postMessage({ type: 'cancel' });
+      activeCopyWorkers.delete(id);
+      console.log(`Sent cancel request to copy worker for ID: ${id}`);
+      return { success: true };
+    } catch (err) {
+      return { success: false, error: err.message };
+    }
+  }
+  return { success: false, error: 'عملیات کپی فعالی برای این شناسه یافت نشد.' };
+});
+
+// IPC handle for pausing an ongoing file copy
+ipcMain.handle('pause-copy', async (event, id) => {
+  const worker = activeCopyWorkers.get(id);
+  if (worker) {
+    try {
+      worker.postMessage({ type: 'pause' });
+      console.log(`Sent pause request to copy worker for ID: ${id}`);
+      return { success: true };
+    } catch (err) {
+      return { success: false, error: err.message };
+    }
+  }
+  return { success: false, error: 'عملیات کپی فعالی برای این شناسه یافت نشد.' };
+});
+
+// IPC handle for resuming a paused file copy
+ipcMain.handle('resume-copy', async (event, id) => {
+  const worker = activeCopyWorkers.get(id);
+  if (worker) {
+    try {
+      worker.postMessage({ type: 'resume' });
+      console.log(`Sent resume request to copy worker for ID: ${id}`);
       return { success: true };
     } catch (err) {
       return { success: false, error: err.message };
@@ -2573,78 +2638,71 @@ ipcMain.handle('copy-file-to-usb', async (event, { sourcePath, destDir, id, cust
         destPath = path.join(destDir, filename);
       }
 
-      const readStream = fs.createReadStream(sourcePath);
-      const writeStream = fs.createWriteStream(destPath);
+      const { Worker } = require('worker_threads');
+      const workerScriptPath = path.join(__dirname, 'copy-worker.cjs');
 
-      // Register active streams for cancel support
-      activeCopyStreams.set(id, { readStream, writeStream, destPath });
+      // Create log directory for audit logs of copying operations
+      const logDir = path.join(app.getPath('userData'), 'copy-logs');
+      if (!fs.existsSync(logDir)) {
+        try { fs.mkdirSync(logDir, { recursive: true }); } catch (e) {}
+      }
+      const logFilePath = path.join(logDir, `copy-log-${new Date().toISOString().split('T')[0]}.txt`);
 
-      const totalBytes = stat.size;
-      let bytesCopied = 0;
-      let startTime = Date.now();
-      let lastProgressTime = Date.now();
-      let bytesInInterval = 0;
+      function writeToLog(message) {
+        const timestamp = new Date().toISOString();
+        const logLine = `[${timestamp}] [ID: ${id}] ${message}\n`;
+        fs.appendFile(logFilePath, logLine, { encoding: 'utf8' }, (err) => {
+          if (err) console.error('Failed to write to copy log:', err);
+        });
+      }
 
-      readStream.on('data', (chunk) => {
-        bytesCopied += chunk.length;
-        bytesInInterval += chunk.length;
+      writeToLog(`Request to copy initiated: Source: "${sourcePath}" -> Destination: "${destPath}"`);
 
-        const now = Date.now();
-        if (now - lastProgressTime > 200) {
-          const timeElapsedSec = (now - startTime) / 1000;
-          const speedMbs = timeElapsedSec > 0 ? (bytesCopied / (1024 * 1024)) / timeElapsedSec : 0;
+      // Spawn Worker Thread for copying
+      const worker = new Worker(workerScriptPath, {
+        workerData: {
+          sourcePath,
+          destPath,
+          id,
+          bufferSize: 4 * 1024 * 1024 // 4MB optimized block buffer for Windows storage speed
+        }
+      });
 
+      activeCopyWorkers.set(id, worker);
+
+      worker.on('message', (message) => {
+        if (message.type === 'progress') {
           if (mainWindow && !mainWindow.isDestroyed()) {
-            mainWindow.webContents.send('copy-progress', {
-              id,
-              progress: totalBytes > 0 ? Math.round((bytesCopied / totalBytes) * 100) : 0,
-              bytesCopied,
-              totalBytes,
-              speedMbs,
-              completed: false
-            });
+            mainWindow.webContents.send('copy-progress', message.data);
           }
-
-          lastProgressTime = now;
-          bytesInInterval = 0;
+        } else if (message.type === 'log') {
+          writeToLog(message.data.message);
+        } else if (message.type === 'completed') {
+          writeToLog(`Successfully completed copy operation for ID: ${id}`);
+          activeCopyWorkers.delete(id);
+          resolve({ success: true, destPath: message.data.destPath });
+        } else if (message.type === 'cancelled') {
+          writeToLog(`Cancelled copy operation for ID: ${id}`);
+          activeCopyWorkers.delete(id);
+          resolve({ success: false, error: 'عملیات کپی توسط اپراتور لغو شد.' });
+        } else if (message.type === 'error') {
+          writeToLog(`Error in copy operation for ID: ${id}. Error: ${message.data.error}`);
+          activeCopyWorkers.delete(id);
+          resolve({ success: false, error: message.data.error });
         }
       });
 
-      readStream.pipe(writeStream);
-
-      writeStream.on('finish', () => {
-        writeStream.close();
-        activeCopyStreams.delete(id);
-        if (mainWindow && !mainWindow.isDestroyed()) {
-          mainWindow.webContents.send('copy-progress', {
-            id,
-            progress: 100,
-            bytesCopied,
-            totalBytes,
-            speedMbs: totalBytes > 0 ? (bytesCopied / (1024 * 1024)) / ((Date.now() - startTime) / 1000) : 0,
-            completed: true
-          });
-        }
-        resolve({ success: true, destPath });
+      worker.on('error', (err) => {
+        writeToLog(`Worker thread error for ID: ${id}. Error: ${err.message}`);
+        activeCopyWorkers.delete(id);
+        resolve({ success: false, error: err.message });
       });
 
-      readStream.on('error', (err) => {
-        writeStream.close();
-        activeCopyStreams.delete(id);
-        if (fs.existsSync(destPath)) {
-          try { fs.unlinkSync(destPath); } catch (ex) {}
+      worker.on('exit', (code) => {
+        if (code !== 0) {
+          writeToLog(`Worker thread exited with non-zero code ${code} for ID: ${id}`);
         }
-        resolve({ success: false, error: 'خطا در خواندن فایل منبع: ' + err.message });
-      });
-
-      writeStream.on('error', (err) => {
-        readStream.destroy();
-        writeStream.close();
-        activeCopyStreams.delete(id);
-        if (fs.existsSync(destPath)) {
-          try { fs.unlinkSync(destPath); } catch (ex) {}
-        }
-        resolve({ success: false, error: 'خطا در نوشتن روی فلش دیسک: ' + err.message });
+        activeCopyWorkers.delete(id);
       });
 
     } catch (err) {
