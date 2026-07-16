@@ -42,7 +42,9 @@ import {
   Server,
   Play,
   Grid,
-  List
+  List,
+  Layers,
+  Sparkles
 } from 'lucide-react';
 
 interface SettingsPageProps {
@@ -77,6 +79,7 @@ export default function SettingsPage({ onSettingsChange, onLogout }: SettingsPag
   const [defaultQuality, setDefaultQuality] = useState('1080p BluRay');
   const [lanEnabled, setLanEnabled] = useState(true);
   const [defaultViewMode, setDefaultViewMode] = useState<'card' | 'list'>('card');
+  const [cardStyle, setCardStyle] = useState<'modern' | 'glassy' | 'creative'>('modern');
 
   // Shop Info
   const [shopName, setShopName] = useState('');
@@ -339,6 +342,7 @@ export default function SettingsPage({ onSettingsChange, onLogout }: SettingsPag
     setDefaultQuality(s.defaultQuality || '1080p BluRay');
     setLanEnabled(s.lanEnabled !== undefined ? s.lanEnabled : true);
     setDefaultViewMode(s.defaultViewMode || 'card');
+    setCardStyle(s.cardStyle || 'modern');
     setShopName(s.shopName || '');
     setShopAddress(s.shopAddress || '');
     setShopPhone(s.shopPhone || '');
@@ -589,7 +593,8 @@ export default function SettingsPage({ onSettingsChange, onLogout }: SettingsPag
       shopPhone,
       shopPhoneSecondary,
       lanEnabled: !!lanEnabled,
-      defaultViewMode
+      defaultViewMode,
+      cardStyle
     });
     setSettings(updated);
     onSettingsChange(updated);
@@ -1172,6 +1177,64 @@ export default function SettingsPage({ onSettingsChange, onLogout }: SettingsPag
                     >
                       <List className="w-3.5 h-3.5" />
                       <span>نمای لیستی</span>
+                    </button>
+                  </div>
+                </div>
+
+                {/* Card Styles Configuration */}
+                <div className="space-y-2 pt-4 border-t border-gray-150 dark:border-gray-800/80" id="card-style-setting-container">
+                  <label className="text-[11px] font-black text-indigo-500 block">سبک طراحی کارت‌های فیلم و سریال (Card Visual Style)</label>
+                  <p className="text-[10px] text-gray-400 mt-0.5">سبک بصری کارت‌ها را مطابق سلیقه خود انتخاب کنید. هر ۳ سبک بصورت سراسری در برنامه اعمال می‌شوند.</p>
+                  <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
+                    <button
+                      type="button"
+                      onClick={() => setCardStyle('modern')}
+                      className={`p-3.5 rounded-xl border text-right transition-all cursor-pointer flex flex-col gap-1.5 relative overflow-hidden ${
+                        cardStyle === 'modern'
+                          ? 'bg-indigo-50/50 dark:bg-indigo-950/20 border-indigo-500 ring-2 ring-indigo-500/10'
+                          : 'bg-white dark:bg-slate-800/60 border-gray-200 dark:border-gray-800/80 hover:bg-gray-50 hover:dark:bg-slate-800'
+                      }`}
+                    >
+                      <div className="flex items-center gap-2">
+                        <Grid className={`w-4 h-4 ${cardStyle === 'modern' ? 'text-indigo-600 dark:text-indigo-400' : 'text-gray-400'}`} />
+                        <span className="text-xs font-black text-gray-800 dark:text-gray-250">کلاسیک مدرن</span>
+                        {cardStyle === 'modern' && <span className="absolute left-2.5 top-2.5 w-1.5 h-1.5 rounded-full bg-indigo-500 animate-pulse"></span>}
+                      </div>
+                      <span className="text-[10px] text-gray-450 dark:text-gray-400 leading-relaxed font-medium">کادربندی مستحکم، پس‌زمینه جامد، سایه‌های ظریف و خوانش سریع جزییات اثر.</span>
+                    </button>
+
+                    <button
+                      type="button"
+                      onClick={() => setCardStyle('glassy')}
+                      className={`p-3.5 rounded-xl border text-right transition-all cursor-pointer flex flex-col gap-1.5 relative overflow-hidden ${
+                        cardStyle === 'glassy'
+                          ? 'bg-indigo-50/50 dark:bg-indigo-950/20 border-indigo-500 ring-2 ring-indigo-500/10'
+                          : 'bg-white dark:bg-slate-800/60 border-gray-200 dark:border-gray-800/80 hover:bg-gray-50 hover:dark:bg-slate-800'
+                      }`}
+                    >
+                      <div className="flex items-center gap-2">
+                        <Layers className={`w-4 h-4 ${cardStyle === 'glassy' ? 'text-indigo-600 dark:text-indigo-400' : 'text-gray-400'}`} />
+                        <span className="text-xs font-black text-gray-800 dark:text-gray-250">شیشه‌ای پیشرفته</span>
+                        {cardStyle === 'glassy' && <span className="absolute left-2.5 top-2.5 w-1.5 h-1.5 rounded-full bg-indigo-500 animate-pulse"></span>}
+                      </div>
+                      <span className="text-[10px] text-gray-450 dark:text-gray-400 leading-relaxed font-medium">طراحی شیشه‌ای Aero Glass نیمه‌شفاف با فیلتر بلور و درخشش نئونی ملایم دور قاب.</span>
+                    </button>
+
+                    <button
+                      type="button"
+                      onClick={() => setCardStyle('creative')}
+                      className={`p-3.5 rounded-xl border text-right transition-all cursor-pointer flex flex-col gap-1.5 relative overflow-hidden ${
+                        cardStyle === 'creative'
+                          ? 'bg-indigo-50/50 dark:bg-indigo-950/20 border-indigo-500 ring-2 ring-indigo-500/10'
+                          : 'bg-white dark:bg-slate-800/60 border-gray-200 dark:border-gray-800/80 hover:bg-gray-50 hover:dark:bg-slate-800'
+                      }`}
+                    >
+                      <div className="flex items-center gap-2">
+                        <Sparkles className={`w-4 h-4 ${cardStyle === 'creative' ? 'text-indigo-600 dark:text-indigo-400' : 'text-gray-400'}`} />
+                        <span className="text-xs font-black text-gray-800 dark:text-gray-250">سینمایی خلاقانه</span>
+                        {cardStyle === 'creative' && <span className="absolute left-2.5 top-2.5 w-1.5 h-1.5 rounded-full bg-indigo-500 animate-pulse"></span>}
+                      </div>
+                      <span className="text-[10px] text-gray-450 dark:text-gray-400 leading-relaxed font-medium">پوستر تمام‌قاب هنری و سینمایی با پنهان‌سازی هوشمند جزییات و ظهور متحرک روی هاور.</span>
                     </button>
                   </div>
                 </div>

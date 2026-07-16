@@ -21,7 +21,50 @@ export interface ParsedSeries {
 
 export type ParsedMedia = ParsedMovie | ParsedSeries;
 
+export interface LearnedRule {
+  id: string;
+  keyword: string; // e.g. "HAFT" or "HAFT E" or custom pattern
+  seriesName: string;
+  season: string;
+}
+
 export class FilenameParser {
+  /**
+   * Retrieve learned naming rules from localStorage
+   */
+  public static getLearnedRules(): LearnedRule[] {
+    if (typeof window === 'undefined') return [];
+    try {
+      const stored = localStorage.getItem('parstech_learned_rules');
+      return stored ? JSON.parse(stored) : [];
+    } catch (e) {
+      console.error('Error loading learned rules:', e);
+      return [];
+    }
+  }
+
+  /**
+   * Save a new learned naming rule
+   */
+  public static saveLearnedRule(keyword: string, seriesName: string, season: string): void {
+    if (typeof window === 'undefined') return;
+    try {
+      const rules = this.getLearnedRules();
+      // Remove existing for same keyword to prevent duplicates
+      const filtered = rules.filter(r => r.keyword.toLowerCase() !== keyword.toLowerCase());
+      filtered.push({
+        id: 'rule_' + Math.random().toString(36).substr(2, 9),
+        keyword,
+        seriesName,
+        season
+      });
+      localStorage.setItem('parstech_learned_rules', JSON.stringify(filtered));
+      console.log('Saved new learned rule:', keyword, seriesName, season);
+    } catch (e) {
+      console.error('Error saving learned rule:', e);
+    }
+  }
+
   /**
    * Parses any movie or TV series filename and extracts metadata.
    * 
@@ -41,11 +84,7 @@ export class FilenameParser {
     }
 
     // Normalise dots, underscores, and hyphens into spaces to simplify scanning tokens
-    const normalized = nameWithoutExt.replace(/[\._]/g, ' ');
-
-    // Match Series Patterns: S02E05 or S2E5 or 2x05 or s02e05
-    const sSeriesRegex = /\b[Ss](\d+)[Ee](\d+)\b/; // S02E05
-    const xSeriesRegex = /\b(\d+)x(\d+)\b/;       // 2x05
+    const normalized = nameWithoutExt.replace(/[\._\-]/g, ' ');
 
     let isSeries = false;
     let seriesName = '';
@@ -53,16 +92,36 @@ export class FilenameParser {
     let episode = '';
     let episodeNumber = '';
 
-    let matchS = normalized.match(sSeriesRegex);
-    let matchX = normalized.match(xSeriesRegex);
-
     let matchIndex = -1;
     let matchLength = 0;
+
+    // Check learned rules first to override default parsing
+    const learnedRules = this.getLearnedRules();
+    let matchedRule: LearnedRule | null = null;
+    
+    for (const rule of learnedRules) {
+      if (normalized.toLowerCase().includes(rule.keyword.toLowerCase())) {
+        matchedRule = rule;
+        break;
+      }
+    }
+
+    // Match Series Patterns: S02E05 or S2E5 or 2x05 or s02e05
+    const sSeriesRegex = /\b[Ss](\d+)\s*[Ee](\d+)\b/i; // S02E05, S2 E5, S02_E05, S02-E05
+    const xSeriesRegex = /\b(\d+)\s*[xX]\s*(\d+)\b/;       // 2x05, 2 x 05
+    const eOnlyRegex = /\b[Ee](?:p(?:isode)?)?\s*(\d+)\b/; // E07, E07, Ep07, Episode 7, e7 (case-insensitive done in matching below)
+    const partRegex = /\b(?:part|part_|episode|ep|ep_)\s*(\d+)\b/i; // Part 7, Part_07, Ep 7
+    
+    // Test combinations
+    let matchS = normalized.match(sSeriesRegex);
+    let matchX = normalized.match(xSeriesRegex);
+    let matchE = normalized.match(new RegExp(eOnlyRegex.source, 'i'));
+    let matchPart = normalized.match(partRegex);
 
     if (matchS) {
       isSeries = true;
       season = matchS[1];
-      episode = matchS[0].toUpperCase(); // "S02E05"
+      episode = matchS[0].toUpperCase().replace(/\s/g, ''); // "S02E05"
       episodeNumber = matchS[2];
       matchIndex = matchS.index || -1;
       matchLength = matchS[0].length;
@@ -73,6 +132,29 @@ export class FilenameParser {
       episodeNumber = matchX[2];
       matchIndex = matchX.index || -1;
       matchLength = matchX[0].length;
+    } else if (matchE) {
+      isSeries = true;
+      season = matchedRule ? matchedRule.season : '1'; // Default to 1, or override by matched rule
+      episodeNumber = matchE[1];
+      episode = `S${season.padStart(2, '0')}E${episodeNumber.padStart(2, '0')}`;
+      matchIndex = matchE.index || -1;
+      matchLength = matchE[0].length;
+    } else if (matchPart) {
+      isSeries = true;
+      season = matchedRule ? matchedRule.season : '1';
+      episodeNumber = matchPart[1];
+      episode = `S${season.padStart(2, '0')}E${episodeNumber.padStart(2, '0')}`;
+      matchIndex = matchPart.index || -1;
+      matchLength = matchPart[0].length;
+    } else if (matchedRule) {
+      // If we have a matched rule and no episode found, let's see if there is any trailing number
+      const trailingNumberMatch = normalized.match(/\b(\d+)\b/g);
+      if (trailingNumberMatch && trailingNumberMatch.length > 0) {
+        isSeries = true;
+        season = matchedRule.season;
+        episodeNumber = trailingNumberMatch[trailingNumberMatch.length - 1]; // pick last number as episode
+        episode = `S${season.padStart(2, '0')}E${episodeNumber.padStart(2, '0')}`;
+      }
     }
 
     // Extract attributes (Year, Resolution, Source, Codec)
@@ -117,11 +199,18 @@ export class FilenameParser {
     extractedName = extractedName.replace(/\s*[\(\[\-\+]$/, '').trim();
     extractedName = extractedName.replace(/^[\(\[\-\+]\s*/, '').trim();
 
+    // If matched rule exists, apply the mapped series name
+    if (matchedRule) {
+      seriesName = matchedRule.seriesName;
+    } else {
+      seriesName = extractedName || 'Unknown Series';
+    }
+
     if (isSeries) {
       return {
         isSeries: true,
-        seriesName: extractedName || 'Unknown Series',
-        season,
+        seriesName: seriesName,
+        season: season || '1',
         episode,
         episodeNumber,
         year,

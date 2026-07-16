@@ -35,7 +35,8 @@ const DEFAULT_SETTINGS: AppSettings = {
   customQualities: ['1080p BluRay', '1080p WEB-DL', '720p BluRay', '720p WEB-DL', '4K UltraHD', '1080p x265 10bit', '720p x265 10bit'],
   videoPlayerMode: 'internal',
   saveInvoiceToUsbEnabled: true,
-  defaultViewMode: 'card'
+  defaultViewMode: 'card',
+  cardStyle: 'modern'
 };
 
 class DatabaseService {

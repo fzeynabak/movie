@@ -20,7 +20,7 @@ export class SettingsService {
   public static getTMDbSettings(): TMDbSettings {
     const settings = dbService.getSettings();
     return {
-      apiKey: settings?.tmdbApiKey || '',
+      apiKey: settings?.tmdbApiKey || '15d2ea6d0dc1d476efbca3de2b9bfa5e',
       readAccessToken: settings?.tmdbReadAccessToken || '',
       language: settings?.tmdbLanguage || 'fa-IR',
       includeAdult: !!settings?.tmdbIncludeAdult

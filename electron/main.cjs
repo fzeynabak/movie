@@ -1827,6 +1827,43 @@ function extractMediaInfo(html, url) {
     if (!info.poster) {
       info.poster = `https://images.unsplash.com/photo-1536440136628-849c177e76a1?q=80&w=600&auto=format&fit=crop`;
     }
+
+    // Advanced automated download link harvesting from anchor elements
+    const collectedLinks = [];
+    try {
+      const anchorRegex = /<a\s+[^>]*?href=["']([^"']+)["'][^>]*>([\s\S]*?)<\/a>/gi;
+      let match;
+      while ((match = anchorRegex.exec(html)) !== null) {
+        const href = match[1].trim();
+        const text = match[2].replace(/<[^>]+>/g, '').replace(/&nbsp;/g, ' ').trim();
+        
+        const isDownloadable = /\.(mkv|mp4|srt|zip|rar)$/i.test(href.split('?')[0]) || 
+                             href.includes('/dl/') || 
+                             href.includes('/download/') || 
+                             href.includes('dl.') || 
+                             href.includes('download.');
+                             
+        if (isDownloadable && !href.startsWith('#') && !href.startsWith('javascript:')) {
+          let absoluteUrl = href;
+          if (!href.startsWith('http')) {
+            const urlLib = require('url');
+            const parsedUrl = urlLib.parse(url);
+            const base = `${parsedUrl.protocol}//${parsedUrl.host}`;
+            absoluteUrl = urlLib.resolve(base, href);
+          }
+          if (!collectedLinks.some(l => l.url === absoluteUrl)) {
+            collectedLinks.push({
+              url: absoluteUrl,
+              text: text || path.basename(absoluteUrl) || 'لینک دانلود'
+            });
+          }
+        }
+      }
+    } catch (linkErr) {
+      console.error('Error harvesting anchor links from page:', linkErr);
+    }
+    info.downloadLinks = collectedLinks;
+
   } catch (err) {
     console.error('Error parsing scraping details:', err);
   }
@@ -2551,6 +2588,189 @@ ipcMain.handle('download-lan-file', async (event, url, destPath) => {
       resolve({ success: false, error: err.message });
     });
   });
+});
+
+// Active internet download requests map for cancellation support
+const activeDownloads = new Map();
+
+ipcMain.handle('download-internet-file', async (event, { taskId, url, destPath, options = {} }) => {
+  return new Promise((resolve) => {
+    const http = require('http');
+    const https = require('https');
+    const urlLib = require('url');
+
+    let currentUrl = url;
+    let redirectCount = 0;
+    const maxRedirects = 10;
+
+    function startDownloadStream(downloadUrl) {
+      try {
+        const parsedUrl = urlLib.parse(downloadUrl);
+        const isHttps = parsedUrl.protocol === 'https:';
+        const httpLib = isHttps ? https : http;
+
+        const requestOptions = {
+          hostname: parsedUrl.hostname,
+          port: parsedUrl.port,
+          path: parsedUrl.path,
+          method: 'GET',
+          headers: {
+            'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+          }
+        };
+
+        if (options && options.headers) {
+          requestOptions.headers = { ...requestOptions.headers, ...options.headers };
+        }
+
+        if (options && options.cookies) {
+          requestOptions.headers['Cookie'] = options.cookies;
+        }
+
+        const destDir = path.dirname(destPath);
+        if (!fs.existsSync(destDir)) {
+          try {
+            fs.mkdirSync(destDir, { recursive: true });
+          } catch (e) {
+            return resolve({ success: false, error: 'خطا در ایجاد پوشه مقصد: ' + e.message });
+          }
+        }
+
+        const writeStream = fs.createWriteStream(destPath);
+        let totalBytes = 0;
+        let bytesWritten = 0;
+        let startTime = Date.now();
+        let lastProgressTime = Date.now();
+        let bytesInInterval = 0;
+
+        const req = httpLib.request(requestOptions, (response) => {
+          // Handle redirect
+          if ([301, 302, 303, 307, 308].includes(response.statusCode)) {
+            const redirectUrl = response.headers.location;
+            if (redirectUrl) {
+              redirectCount++;
+              if (redirectCount > maxRedirects) {
+                writeStream.close();
+                try { fs.unlinkSync(destPath); } catch (e) {}
+                return resolve({ success: false, error: 'خطای ریدایرکت‌های متعدد (Too many redirects)' });
+              }
+              writeStream.close();
+              try { fs.unlinkSync(destPath); } catch (e) {}
+              
+              // Resolve relative path if needed
+              let absoluteRedirectUrl = redirectUrl;
+              if (!redirectUrl.startsWith('http')) {
+                const base = `${parsedUrl.protocol}//${parsedUrl.host}`;
+                absoluteRedirectUrl = urlLib.resolve(base, redirectUrl);
+              }
+              
+              startDownloadStream(absoluteRedirectUrl);
+              return;
+            }
+          }
+
+          if (response.statusCode !== 200) {
+            writeStream.close();
+            try { fs.unlinkSync(destPath); } catch (e) {}
+            return resolve({ success: false, error: `کد خطای سرور: ${response.statusCode}` });
+          }
+
+          totalBytes = parseInt(response.headers['content-length'] || '0', 10);
+
+          response.on('data', (chunk) => {
+            bytesWritten += chunk.length;
+            bytesInInterval += chunk.length;
+
+            const now = Date.now();
+            if (now - lastProgressTime > 250) {
+              const timeElapsedSec = (now - startTime) / 1000;
+              const totalSpeedMBs = timeElapsedSec > 0 ? (bytesWritten / (1024 * 1024)) / timeElapsedSec : 0;
+
+              if (mainWindow && !mainWindow.isDestroyed()) {
+                mainWindow.webContents.send('download-task-progress', {
+                  id: taskId,
+                  progress: totalBytes > 0 ? Math.round((bytesWritten / totalBytes) * 100) : 0,
+                  bytesWritten,
+                  totalBytes,
+                  speedMbs: totalSpeedMBs,
+                  timeElapsed: timeElapsedSec,
+                  completed: false
+                });
+              }
+
+              lastProgressTime = now;
+              bytesInInterval = 0;
+            }
+          });
+
+          response.pipe(writeStream);
+
+          writeStream.on('finish', () => {
+            writeStream.close();
+            activeDownloads.delete(taskId);
+            
+            if (mainWindow && !mainWindow.isDestroyed()) {
+              mainWindow.webContents.send('download-task-progress', {
+                id: taskId,
+                progress: 100,
+                bytesWritten,
+                totalBytes,
+                speedMbs: totalBytes > 0 ? (bytesWritten / (1024 * 1024)) / ((Date.now() - startTime) / 1000) : 0,
+                timeElapsed: (Date.now() - startTime) / 1000,
+                completed: true
+              });
+            }
+            resolve({ success: true, path: destPath });
+          });
+        });
+
+        req.on('error', (err) => {
+          writeStream.close();
+          activeDownloads.delete(taskId);
+          if (fs.existsSync(destPath)) {
+            try { fs.unlinkSync(destPath); } catch (ex) {}
+          }
+          resolve({ success: false, error: err.message });
+        });
+
+        writeStream.on('error', (err) => {
+          req.destroy();
+          writeStream.close();
+          activeDownloads.delete(taskId);
+          if (fs.existsSync(destPath)) {
+            try { fs.unlinkSync(destPath); } catch (ex) {}
+          }
+          resolve({ success: false, error: err.message });
+        });
+
+        activeDownloads.set(taskId, req);
+        req.end();
+
+      } catch (err) {
+        activeDownloads.delete(taskId);
+        if (fs.existsSync(destPath)) {
+          try { fs.unlinkSync(destPath); } catch (ex) {}
+        }
+        resolve({ success: false, error: err.message });
+      }
+    }
+
+    startDownloadStream(currentUrl);
+  });
+});
+
+ipcMain.handle('cancel-download-file', async (event, taskId) => {
+  const req = activeDownloads.get(taskId);
+  if (req) {
+    try {
+      req.destroy();
+      activeDownloads.delete(taskId);
+      return { success: true };
+    } catch (e) {
+      return { success: false, error: e.message };
+    }
+  }
+  return { success: false, error: 'تسک یافت نشد یا پایان یافته است.' };
 });
 
 // Active copy workers map for cancellation and pause support

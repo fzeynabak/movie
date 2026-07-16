@@ -172,6 +172,7 @@ export interface AppSettings {
   videoPlayerMode?: 'internal' | 'external';
   saveInvoiceToUsbEnabled?: boolean;
   defaultViewMode?: 'card' | 'list';
+  cardStyle?: 'modern' | 'glassy' | 'creative';
 }
 
 declare global {

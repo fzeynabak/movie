@@ -424,4 +424,116 @@ export class TMDbService {
       return null;
     }
   }
+
+  /**
+   * Fetch trending movies from TMDB.
+   */
+  public static async getTrendingMovies(page: number = 1): Promise<any[]> {
+    if (!SettingsService.hasCredentials()) return [];
+    try {
+      const data = await this.fetchTMDb('trending/movie/week', { page: String(page) });
+      return data.results || [];
+    } catch (err) {
+      console.error('Error fetching trending movies:', err);
+      try {
+        const fallback = await this.fetchTMDb('movie/popular', { page: String(page) });
+        return fallback.results || [];
+      } catch (e) {
+        return [];
+      }
+    }
+  }
+
+  /**
+   * Fetch trending TV series from TMDB.
+   */
+  public static async getTrendingTV(page: number = 1): Promise<any[]> {
+    if (!SettingsService.hasCredentials()) return [];
+    try {
+      const data = await this.fetchTMDb('trending/tv/week', { page: String(page) });
+      return data.results || [];
+    } catch (err) {
+      console.error('Error fetching trending TV:', err);
+      try {
+        const fallback = await this.fetchTMDb('tv/popular', { page: String(page) });
+        return fallback.results || [];
+      } catch (e) {
+        return [];
+      }
+    }
+  }
+
+  /**
+   * Fetch upcoming/now playing movies from TMDB.
+   */
+  public static async getUpcomingMovies(page: number = 1): Promise<any[]> {
+    if (!SettingsService.hasCredentials()) return [];
+    try {
+      const data = await this.fetchTMDb('movie/now_playing', { page: String(page) });
+      return data.results || [];
+    } catch (err) {
+      console.error('Error fetching upcoming movies:', err);
+      try {
+        const fallback = await this.fetchTMDb('movie/upcoming', { page: String(page) });
+        return fallback.results || [];
+      } catch (e) {
+        return [];
+      }
+    }
+  }
+
+  /**
+   * Fetch detailed season episodes list from TMDB.
+   */
+  public static async getSeasonDetails(seriesId: number, seasonNumber: number): Promise<any> {
+    if (!SettingsService.hasCredentials()) return null;
+    try {
+      return await this.fetchTMDb(`tv/${seriesId}/season/${seasonNumber}`);
+    } catch (err) {
+      console.error(`Error fetching season details for show ${seriesId} season ${seasonNumber}:`, err);
+      return null;
+    }
+  }
+
+  /**
+   * Fetch Iranian movies from TMDB (Persian language fa) - Recent releases only.
+   */
+  public static async getIranianMovies(page: number = 1): Promise<any[]> {
+    if (!SettingsService.hasCredentials()) return [];
+    try {
+      const today = new Date().toISOString().split('T')[0];
+      const data = await this.fetchTMDb('discover/movie', {
+        page: String(page),
+        with_original_language: 'fa',
+        'primary_release_date.lte': today,
+        'primary_release_date.gte': '2021-01-01',
+        sort_by: 'primary_release_date.desc'
+      });
+      return data.results || [];
+    } catch (err) {
+      console.error('Error fetching Iranian movies:', err);
+      return [];
+    }
+  }
+
+  /**
+   * Fetch Iranian TV series from TMDB (Persian language fa) - Recent releases only.
+   */
+  public static async getIranianTV(page: number = 1): Promise<any[]> {
+    if (!SettingsService.hasCredentials()) return [];
+    try {
+      const today = new Date().toISOString().split('T')[0];
+      const data = await this.fetchTMDb('discover/tv', {
+        page: String(page),
+        with_original_language: 'fa',
+        'first_air_date.lte': today,
+        'first_air_date.gte': '2021-01-01',
+        sort_by: 'first_air_date.desc'
+      });
+      return data.results || [];
+    } catch (err) {
+      console.error('Error fetching Iranian TV series:', err);
+      return [];
+    }
+  }
 }

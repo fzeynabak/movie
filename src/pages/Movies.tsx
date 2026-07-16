@@ -114,7 +114,25 @@ export default function Movies({
   const [showScanPreviewModal, setShowScanPreviewModal] = useState(false);
   const [currentPage, setCurrentPage] = useState(1);
   const [pageSize, setPageSize] = useState(20);
+  const [filterOnlyRecent, setFilterOnlyRecent] = useState(false);
   const [showFormModal, setShowFormModal] = useState(false);
+
+  // Reset pagination to page 1 on filter or search changes
+  useEffect(() => {
+    setCurrentPage(1);
+  }, [
+    selectedCategory,
+    searchQuery,
+    filterCountry,
+    filterLanguage,
+    filterGenre,
+    filterYear,
+    filterQuality,
+    filterMinImdb,
+    filterCrew,
+    filterOnlyRecent,
+    colFilters
+  ]);
 
   // Form Fields State
   const [formCategory, setFormCategory] = useState<MediaCategory>('ایرانی');
@@ -1200,6 +1218,20 @@ export default function Movies({
       const minImdbVal = parseFloat(toGregorianNumStr(filterMinImdb)) || 0;
       const matchesMinImdb = !filterMinImdb || imdbVal >= minImdbVal;
       
+      let matchesOnlyRecent = true;
+      if (filterOnlyRecent) {
+        const parsedYear = parseInt(toGregorianNumStr(movie.year)) || 0;
+        if (parsedYear > 0) {
+          if (parsedYear < 1900) {
+            // Solar Hijri year
+            matchesOnlyRecent = parsedYear >= 1397;
+          } else {
+            // Gregorian year
+            matchesOnlyRecent = parsedYear >= 2018;
+          }
+        }
+      }
+      
       const matchesCrew = !filterCrew || 
         movie.director.toLowerCase().includes(filterCrew.toLowerCase()) ||
         movie.actors.toLowerCase().includes(filterCrew.toLowerCase()) ||
@@ -1214,10 +1246,10 @@ export default function Movies({
       const matchesColCategory = !colFilters.category || (movie.category || '').toLowerCase().includes(colFilters.category.toLowerCase());
       const matchesColDirector = !colFilters.director || movie.director.toLowerCase().includes(colFilters.director.toLowerCase());
 
-      return matchesCategory && matchesSearch && matchesCountry && matchesLanguage && matchesGenre && matchesYear && matchesQuality && matchesMinImdb && matchesCrew &&
+      return matchesCategory && matchesSearch && matchesCountry && matchesLanguage && matchesGenre && matchesYear && matchesQuality && matchesMinImdb && matchesCrew && matchesOnlyRecent &&
              matchesColTitleFa && matchesColTitleEn && matchesColQuality && matchesColImdb && matchesColYear && matchesColCategory && matchesColDirector;
     });
-  }, [movies, selectedCategory, searchQuery, filterCountry, filterLanguage, filterGenre, filterYear, filterQuality, filterMinImdb, filterCrew, colFilters]);
+  }, [movies, selectedCategory, searchQuery, filterCountry, filterLanguage, filterGenre, filterYear, filterQuality, filterMinImdb, filterCrew, filterOnlyRecent, colFilters]);
 
   // Sorting
   const sortedMovies = React.useMemo(() => {
@@ -1517,7 +1549,19 @@ export default function Movies({
             </div>
 
             {/* Clear filters trigger row */}
-            <div className="flex justify-end pt-1">
+            <div className="flex flex-col sm:flex-row justify-between items-center pt-2 border-t border-gray-100 dark:border-gray-800/50 mt-1 gap-2">
+              <label className="flex items-center gap-2 cursor-pointer select-none">
+                <input
+                  type="checkbox"
+                  checked={filterOnlyRecent}
+                  onChange={(e) => { setFilterOnlyRecent(e.target.checked); setCurrentPage(1); }}
+                  className="w-4 h-4 text-indigo-600 border-gray-350 rounded focus:ring-indigo-500 dark:border-gray-700 dark:bg-slate-800"
+                />
+                <span className="text-xs font-bold text-gray-750 dark:text-gray-300">
+                  فقط نمایش آثار جدید و اخیر (۵ سال گذشته)
+                </span>
+              </label>
+
               <button
                 onClick={() => {
                   setFilterCountry('');
@@ -1532,6 +1576,7 @@ export default function Movies({
                   setSearchQueryInput('');
                   setSearchQuery('');
                   setSelectedCategory('همه');
+                  setFilterOnlyRecent(false);
                   setCurrentPage(1);
                 }}
                 className="px-3.5 py-1 text-[10px] font-extrabold text-red-600 hover:text-red-750 bg-red-50 hover:bg-red-100 dark:bg-red-950/20 dark:hover:bg-red-950/40 rounded transition-colors cursor-pointer"
@@ -1553,145 +1598,384 @@ export default function Movies({
         </div>
       ) : viewMode === 'card' ? (
         <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-4 lg:grid-cols-5 gap-5" id="movies-grid">
-          {paginatedMovies.map(movie => (
-            <div
-              key={movie.id}
-              onClick={() => setDetailMovie(movie)}
-              className="bg-white dark:bg-[#1e293b] rounded-xl border border-gray-150 dark:border-[#1e293b] overflow-hidden hover:shadow-lg transition-all flex flex-col group cursor-pointer border-transparent dark:hover:border-slate-800 relative shadow-sm"
-              id={`movie-card-${movie.id}`}
-            >
-              {/* Image thumbnail and quick triggers */}
-              <div className="aspect-[2/3] w-full bg-gray-100 relative overflow-hidden group">
-                <img 
-                  src={getSafePosterUrl(movie.poster)} 
-                  alt={movie.titleFa}
-                  className="w-full h-full object-cover group-hover:scale-105 transition-transform duration-500 bg-gray-900"
-                  referrerPolicy="no-referrer"
-                />
-                
-                {/* Category tag */}
-                <span className="absolute top-2 right-2 bg-indigo-600 text-white text-[10px] font-bold px-2 py-0.5 rounded shadow-md z-10">
-                  {movie.category}
-                </span>
+          {paginatedMovies.map(movie => {
+            const activeCardStyle = dbService.getSettings().cardStyle || 'modern';
 
-                {/* IMDb Rating Badge */}
-                <span className="absolute bottom-2 right-2 bg-black/75 text-amber-500 text-[10px] font-mono font-bold px-1.5 py-0.5 rounded shadow-md z-10">
-                  ★ {toPersianNums(movie.imdbRating)}
-                </span>
+            if (activeCardStyle === 'creative') {
+              return (
+                <div
+                  key={movie.id}
+                  onClick={() => setDetailMovie(movie)}
+                  className="group bg-slate-950 rounded-xl border border-gray-800/80 hover:border-indigo-500/60 shadow-md hover:shadow-indigo-500/10 hover:shadow-2xl transition-all duration-500 flex flex-col cursor-pointer relative aspect-[2/3] overflow-hidden"
+                  id={`movie-card-${movie.id}`}
+                >
+                  {/* Poster */}
+                  <img 
+                    src={getSafePosterUrl(movie.poster)} 
+                    alt={movie.titleFa}
+                    className="absolute inset-0 w-full h-full object-cover group-hover:scale-108 transition-transform duration-700 bg-gray-900"
+                    referrerPolicy="no-referrer"
+                  />
 
-                {/* Overlay actions (Hove Triggered) */}
-                <div className="absolute inset-0 bg-black/60 opacity-0 group-hover:opacity-100 flex items-center justify-center gap-2.5 transition-opacity z-20">
-                  {/* Play Action ▶️ */}
-                  <button
-                    onClick={(e) => { e.stopPropagation(); handlePlayFile(movie.filePath, movie.originPeerIp); }}
-                    className="p-2 bg-emerald-500 hover:bg-emerald-600 text-white rounded-full transition-transform transform scale-95 hover:scale-105"
-                    title="پخش ویدیو"
-                    id={`btn-play-${movie.id}`}
-                  >
-                    <Play className="w-4 h-4 fill-current" />
-                  </button>
+                  {/* Category tag */}
+                  <span className="absolute top-2 right-2 bg-indigo-600/90 text-white text-[9px] font-bold px-1.5 py-0.5 rounded shadow-md z-20">
+                    {movie.category}
+                  </span>
 
-                  {/* Folder Open Action 📁 */}
-                  <button
-                    onClick={(e) => { e.stopPropagation(); handleOpenFolder(movie.filePath, movie.originPeerIp); }}
-                    className="p-2 bg-indigo-500 hover:bg-indigo-600 text-white rounded-full transition-transform transform scale-95 hover:scale-105"
-                    title="باز کردن مسیر فایل"
-                    id={`btn-folder-${movie.id}`}
-                  >
-                    <FolderOpen className="w-4 h-4" />
-                  </button>
+                  {/* IMDb Rating Badge */}
+                  <span className="absolute top-2 left-2 bg-black/75 text-amber-500 text-[9px] font-mono font-bold px-1.5 py-0.5 rounded shadow-md z-20">
+                    ★ {toPersianNums(movie.imdbRating)}
+                  </span>
 
-                  {/* Poster zoom action */}
-                  <button
-                    onClick={(e) => { e.stopPropagation(); setZoomedPoster(getSafePosterUrl(movie.poster)); }}
-                    className="p-2 bg-orange-500 hover:bg-orange-600 text-white rounded-full transition-transform transform scale-95 hover:scale-105"
-                    title="بزرگنمایی پوستر"
-                    id={`btn-zoom-${movie.id}`}
-                  >
-                    <Maximize2 className="w-4 h-4" />
-                  </button>
+                  {/* Fully Animated Unified Slide Up Overlay */}
+                  <div className="absolute inset-0 bg-gradient-to-t from-slate-950 via-slate-950/30 to-transparent flex flex-col justify-end p-3.5 z-10 transition-all duration-300">
+                    <div className="transform translate-y-6 group-hover:translate-y-0 transition-transform duration-300 space-y-2">
+                      
+                      <h3 className="text-xs font-black text-white line-clamp-2 leading-snug drop-shadow-md">
+                        {movie.titleFa}
+                      </h3>
+                      <p className="text-[9px] font-bold text-gray-300 truncate font-mono drop-shadow">
+                        {movie.titleEn}
+                      </p>
 
-                  {/* Sell Directly 💰 Action */}
-                  <button
-                    onClick={(e) => handleOpenSale(movie, e)}
-                    className="p-2 bg-amber-500 hover:bg-amber-600 text-white rounded-full transition-transform transform scale-95 hover:scale-105"
-                    title="ثبت فروش این فیلم"
-                    id={`btn-sell-${movie.id}`}
-                  >
-                    <DollarSign className="w-4 h-4" />
-                  </button>
-                </div>
-              </div>
+                      <div className="flex items-center gap-1 flex-wrap">
+                        <span className="text-[8px] bg-white/10 text-gray-250 border border-white/10 px-1 py-0.5 rounded font-mono">
+                          {movie.quality}
+                        </span>
+                        <span className="text-[8px] bg-white/10 text-gray-255 border border-white/10 px-1 py-0.5 rounded truncate max-w-[80px]">
+                          {movie.subtitle}
+                        </span>
+                      </div>
 
-              {/* Text Meta Container */}
-              <div className="p-3.5 flex-1 flex flex-col justify-between" id={`movie-meta-${movie.id}`}>
-                <div>
-                  <h3 className="text-xs font-bold text-gray-900 dark:text-gray-100 group-hover:text-indigo-600 dark:group-hover:text-indigo-400 transition-colors truncate" title={movie.titleFa}>
-                    {movie.titleFa}
-                  </h3>
-                  <p className="text-[10px] text-gray-450 font-mono truncate mt-0.5">{movie.titleEn}</p>
-                  
-                  <div className="flex items-center gap-1.5 flex-wrap mt-2">
-                    <span className="text-[9px] bg-gray-50 text-gray-450 border border-gray-100 dark:bg-gray-800/50 dark:text-gray-300 dark:border-gray-700 px-1 py-0.5 rounded font-mono font-medium shrink-0">
-                      {movie.quality}
-                    </span>
-                    <span className="text-[9px] bg-gray-50 text-gray-455 border border-gray-100 dark:bg-gray-800/10 dark:text-gray-300 dark:border-gray-700 px-1 py-0.5 rounded truncate max-w-[90px]">
-                      {movie.subtitle}
-                    </span>
+                      {/* Quick interactive action triggers & Pricing - ONLY shown on hover (h-0 to h-max) */}
+                      <div className="h-0 opacity-0 group-hover:h-auto group-hover:opacity-100 transition-all duration-300 overflow-hidden flex flex-col gap-2 pt-1 border-t border-white/10">
+                        {/* Action buttons row */}
+                        <div className="flex items-center gap-1.5">
+                          <button
+                            onClick={(e) => { e.stopPropagation(); handlePlayFile(movie.filePath, movie.originPeerIp); }}
+                            className="p-1.5 bg-emerald-500 hover:bg-emerald-600 text-white rounded-full transition-transform transform hover:scale-110"
+                            title="پخش ویدیو"
+                          >
+                            <Play className="w-3.5 h-3.5 fill-current" />
+                          </button>
+                          <button
+                            onClick={(e) => { e.stopPropagation(); handleOpenFolder(movie.filePath, movie.originPeerIp); }}
+                            className="p-1.5 bg-indigo-500 hover:bg-indigo-600 text-white rounded-full transition-transform transform hover:scale-110"
+                            title="مسیر پوشه"
+                          >
+                            <FolderOpen className="w-3.5 h-3.5" />
+                          </button>
+                          <button
+                            onClick={(e) => { e.stopPropagation(); setZoomedPoster(getSafePosterUrl(movie.poster)); }}
+                            className="p-1.5 bg-orange-500 hover:bg-orange-600 text-white rounded-full transition-transform transform hover:scale-110"
+                            title="بزرگنمایی"
+                          >
+                            <Maximize2 className="w-3.5 h-3.5" />
+                          </button>
+                          <button
+                            onClick={(e) => { e.stopPropagation(); handleOpenSale(movie, e); }}
+                            className="p-1.5 bg-amber-500 hover:bg-amber-600 text-white rounded-full transition-transform transform hover:scale-110"
+                            title="فروش سریع"
+                          >
+                            <DollarSign className="w-3.5 h-3.5" />
+                          </button>
+                        </div>
+
+                        {/* Price and core operations (edit, delete) */}
+                        <div className="flex items-center justify-between text-[9px] font-medium">
+                          <span className="text-white opacity-70 font-mono">{toPersianNums(movie.year)}</span>
+                          <span className="font-extrabold text-emerald-400 font-mono">{formatCurrency(movie.salePrice || dbService.getSettings().defaultMoviePrice)}</span>
+                        </div>
+
+                        <div className="flex items-center justify-between pt-1 border-t border-white/5">
+                          {movie.officialSite ? (
+                            <button
+                              onClick={(e) => { e.stopPropagation(); setActiveBrowserUrl(movie.officialSite); }}
+                              className="flex items-center gap-1 text-[8px] text-amber-400 hover:text-amber-350"
+                            >
+                              <Globe className="w-2.5 h-2.5" />
+                              <span>سایت مرجع</span>
+                            </button>
+                          ) : (
+                            <span className="text-[8px] text-gray-500">بدون مرجع</span>
+                          )}
+                          <div className="flex gap-1">
+                            <button onClick={(e) => handleOpenEdit(movie, e)} className="p-0.5 text-gray-400 hover:text-white"><Edit className="w-3 h-3" /></button>
+                            <button onClick={(e) => handleDeleteMovie(movie.id, e)} className="p-0.5 text-gray-400 hover:text-red-400"><Trash2 className="w-3 h-3" /></button>
+                          </div>
+                        </div>
+                      </div>
+
+                    </div>
                   </div>
                 </div>
+              );
+            }
 
-                <div className="border-t border-gray-100 dark:border-gray-800/60 mt-3 pt-3 flex items-center justify-between">
-                  <span className="text-[10px] opacity-75 font-medium font-mono text-gray-500">{toPersianNums(movie.year)}</span>
-                  <div className="flex items-center gap-1.5">
-                    <p className="text-xs font-bold text-emerald-600 font-mono">{formatCurrency(movie.salePrice || dbService.getSettings().defaultMoviePrice)}</p>
-                    <button
-                      onClick={(e) => { e.stopPropagation(); handleOpenSale(movie, e); }}
-                      className="flex items-center gap-1 bg-emerald-600 hover:bg-emerald-500 text-white text-[10px] font-bold px-2 py-1 rounded transition-all shadow-sm shrink-0"
-                      title="ثبت و صدور سریع فاکتور فروش برای این فیلم"
-                    >
-                      <Plus className="w-2.5 h-2.5" />
-                      <span>فروش</span>
-                    </button>
+              if (activeCardStyle === 'glassy') {
+                return (
+                  <div
+                    key={movie.id}
+                    onClick={() => setDetailMovie(movie)}
+                    className="group bg-white/40 dark:bg-slate-900/35 border border-white/20 dark:border-white/5 backdrop-blur-xl rounded-xl overflow-hidden hover:shadow-indigo-500/10 hover:shadow-xl transition-all duration-300 flex flex-col cursor-pointer dark:hover:border-indigo-500/50 hover:border-indigo-500/40 relative shadow-sm"
+                    id={`movie-card-${movie.id}`}
+                  >
+                    {/* Image thumbnail and quick triggers */}
+                    <div className="aspect-[2/3] w-full bg-gray-100/40 dark:bg-slate-900/45 relative overflow-hidden group border-b border-white/10">
+                      <img 
+                        src={getSafePosterUrl(movie.poster)} 
+                        alt={movie.titleFa}
+                        className="w-full h-full object-cover group-hover:scale-105 transition-transform duration-500 bg-gray-900"
+                        referrerPolicy="no-referrer"
+                      />
+                      
+                      {/* Category tag */}
+                      <span className="absolute top-2 right-2 bg-indigo-600/90 text-white text-[10px] font-bold px-2 py-0.5 rounded shadow-md z-10">
+                        {movie.category}
+                      </span>
+
+                      {/* IMDb Rating Badge */}
+                      <span className="absolute bottom-2 right-2 bg-black/75 text-amber-500 text-[10px] font-mono font-bold px-1.5 py-0.5 rounded shadow-md z-10">
+                        ★ {toPersianNums(movie.imdbRating)}
+                      </span>
+
+                      {/* Overlay actions (Hove Triggered) */}
+                      <div className="absolute inset-0 bg-black/60 opacity-0 group-hover:opacity-100 flex items-center justify-center gap-2.5 transition-opacity z-20">
+                        {/* Play Action ▶️ */}
+                        <button
+                          onClick={(e) => { e.stopPropagation(); handlePlayFile(movie.filePath, movie.originPeerIp); }}
+                          className="p-2 bg-emerald-500 hover:bg-emerald-600 text-white rounded-full transition-transform transform scale-95 hover:scale-105"
+                          title="پخش ویدیو"
+                        >
+                          <Play className="w-4 h-4 fill-current" />
+                        </button>
+
+                        {/* Folder Open Action 📁 */}
+                        <button
+                          onClick={(e) => { e.stopPropagation(); handleOpenFolder(movie.filePath, movie.originPeerIp); }}
+                          className="p-2 bg-indigo-500 hover:bg-indigo-600 text-white rounded-full transition-transform transform scale-95 hover:scale-105"
+                          title="باز کردن مسیر فایل"
+                        >
+                          <FolderOpen className="w-4 h-4" />
+                        </button>
+
+                        {/* Poster zoom action */}
+                        <button
+                          onClick={(e) => { e.stopPropagation(); setZoomedPoster(getSafePosterUrl(movie.poster)); }}
+                          className="p-2 bg-orange-500 hover:bg-orange-600 text-white rounded-full transition-transform transform scale-95 hover:scale-105"
+                          title="بزرگنمایی پوستر"
+                        >
+                          <Maximize2 className="w-4 h-4" />
+                        </button>
+
+                        {/* Sell Directly 💰 Action */}
+                        <button
+                          onClick={(e) => { e.stopPropagation(); handleOpenSale(movie, e); }}
+                          className="p-2 bg-amber-500 hover:bg-amber-600 text-white rounded-full transition-transform transform scale-95 hover:scale-105"
+                          title="ثبت فروش این فیلم"
+                        >
+                          <DollarSign className="w-4 h-4" />
+                        </button>
+                      </div>
+                    </div>
+
+                    {/* Text Meta Container */}
+                    <div className="p-3.5 flex-1 flex flex-col justify-between bg-white/20 dark:bg-[#1a2236]/30 backdrop-blur-md">
+                      <div>
+                        <h3 className="text-xs font-bold text-gray-900 dark:text-gray-100 group-hover:text-indigo-650 dark:group-hover:text-indigo-400 transition-colors truncate" title={movie.titleFa}>
+                          {movie.titleFa}
+                        </h3>
+                        <p className="text-[10px] text-gray-450 font-mono truncate mt-0.5">{movie.titleEn}</p>
+                        
+                        <div className="flex items-center gap-1.5 flex-wrap mt-2">
+                          <span className="text-[9px] bg-white/40 dark:bg-slate-800/60 border border-white/10 dark:border-slate-700/50 text-gray-700 dark:text-gray-300 px-1 py-0.5 rounded font-mono font-medium shrink-0">
+                            {movie.quality}
+                          </span>
+                          <span className="text-[9px] bg-white/40 dark:bg-slate-800/60 border border-white/10 dark:border-slate-700/50 text-gray-700 dark:text-gray-300 px-1 py-0.5 rounded truncate max-w-[90px]">
+                            {movie.subtitle}
+                          </span>
+                        </div>
+                      </div>
+
+                      <div className="border-t border-white/10 mt-3 pt-3 flex items-center justify-between">
+                        <span className="text-[10px] opacity-75 font-medium font-mono text-gray-500">{toPersianNums(movie.year)}</span>
+                        <div className="flex items-center gap-1.5">
+                          <p className="text-xs font-bold text-emerald-600 dark:text-emerald-400 font-mono">{formatCurrency(movie.salePrice || dbService.getSettings().defaultMoviePrice)}</p>
+                          <button
+                            onClick={(e) => { e.stopPropagation(); handleOpenSale(movie, e); }}
+                            className="flex items-center gap-1 bg-emerald-600 hover:bg-emerald-500 text-white text-[10px] font-bold px-2 py-1 rounded transition-all shadow-sm shrink-0"
+                            title="ثبت سریع فاکتور فروش"
+                          >
+                            <Plus className="w-2.5 h-2.5" />
+                            <span>فروش</span>
+                          </button>
+                        </div>
+                      </div>
+                    </div>
+
+                    {/* Operations Footer (Edit/Delete icons) */}
+                    <div className="bg-white/10 dark:bg-[#1a2236]/10 px-3 py-1.5 flex justify-between items-center border-t border-white/10">
+                      {movie.officialSite ? (
+                        <button
+                          onClick={(e) => { e.stopPropagation(); setActiveBrowserUrl(movie.officialSite); }}
+                          className="flex items-center gap-1 text-[9px] font-semibold text-amber-500 hover:text-amber-600 hover:bg-amber-500/10 px-1.5 py-0.5 rounded transition-all"
+                        >
+                          <Globe className="w-3 h-3" />
+                          <span>سایت مرجع</span>
+                        </button>
+                      ) : (
+                        <span className="text-[9px] text-gray-400 italic">آدرس مرجع ندارد</span>
+                      )}
+                      <div className="flex gap-1.5">
+                        <button onClick={(e) => handleOpenEdit(movie, e)} className="p-1 text-gray-455 hover:text-indigo-650 transition-colors"><Edit className="w-3.5 h-3.5" /></button>
+                        <button onClick={(e) => handleDeleteMovie(movie.id, e)} className="p-1 text-gray-455 hover:text-red-650 transition-colors"><Trash2 className="w-3.5 h-3.5" /></button>
+                      </div>
+                    </div>
+                  </div>
+                );
+              }
+
+              // Standard default 'modern' design
+              return (
+                <div
+                  key={movie.id}
+                  onClick={() => setDetailMovie(movie)}
+                  className="bg-white dark:bg-[#1e293b] rounded-xl border border-gray-150 dark:border-[#1e293b] overflow-hidden hover:shadow-lg transition-all flex flex-col group cursor-pointer border-transparent dark:hover:border-slate-800 relative shadow-sm"
+                  id={`movie-card-${movie.id}`}
+                >
+                  {/* Image thumbnail and quick triggers */}
+                  <div className="aspect-[2/3] w-full bg-gray-100 relative overflow-hidden group">
+                    <img 
+                      src={getSafePosterUrl(movie.poster)} 
+                      alt={movie.titleFa}
+                      className="w-full h-full object-cover group-hover:scale-105 transition-transform duration-500 bg-gray-900"
+                      referrerPolicy="no-referrer"
+                    />
+                    
+                    {/* Category tag */}
+                    <span className="absolute top-2 right-2 bg-indigo-600 text-white text-[10px] font-bold px-2 py-0.5 rounded shadow-md z-10">
+                      {movie.category}
+                    </span>
+
+                    {/* IMDb Rating Badge */}
+                    <span className="absolute bottom-2 right-2 bg-black/75 text-amber-500 text-[10px] font-mono font-bold px-1.5 py-0.5 rounded shadow-md z-10">
+                      ★ {toPersianNums(movie.imdbRating)}
+                    </span>
+
+                    {/* Overlay actions (Hove Triggered) */}
+                    <div className="absolute inset-0 bg-black/60 opacity-0 group-hover:opacity-100 flex items-center justify-center gap-2.5 transition-opacity z-20">
+                      {/* Play Action ▶️ */}
+                      <button
+                        onClick={(e) => { e.stopPropagation(); handlePlayFile(movie.filePath, movie.originPeerIp); }}
+                        className="p-2 bg-emerald-500 hover:bg-emerald-600 text-white rounded-full transition-transform transform scale-95 hover:scale-105"
+                        title="پخش ویدیو"
+                        id={`btn-play-${movie.id}`}
+                      >
+                        <Play className="w-4 h-4 fill-current" />
+                      </button>
+
+                      {/* Folder Open Action 📁 */}
+                      <button
+                        onClick={(e) => { e.stopPropagation(); handleOpenFolder(movie.filePath, movie.originPeerIp); }}
+                        className="p-2 bg-indigo-500 hover:bg-indigo-600 text-white rounded-full transition-transform transform scale-95 hover:scale-105"
+                        title="باز کردن مسیر فایل"
+                        id={`btn-folder-${movie.id}`}
+                      >
+                        <FolderOpen className="w-4 h-4" />
+                      </button>
+
+                      {/* Poster zoom action */}
+                      <button
+                        onClick={(e) => { e.stopPropagation(); setZoomedPoster(getSafePosterUrl(movie.poster)); }}
+                        className="p-2 bg-orange-500 hover:bg-orange-600 text-white rounded-full transition-transform transform scale-95 hover:scale-105"
+                        title="بزرگنمایی پوستر"
+                        id={`btn-zoom-${movie.id}`}
+                      >
+                        <Maximize2 className="w-4 h-4" />
+                      </button>
+
+                      {/* Sell Directly 💰 Action */}
+                      <button
+                        onClick={(e) => handleOpenSale(movie, e)}
+                        className="p-2 bg-amber-500 hover:bg-amber-600 text-white rounded-full transition-transform transform scale-95 hover:scale-105"
+                        title="ثبت فروش این فیلم"
+                        id={`btn-sell-${movie.id}`}
+                      >
+                        <DollarSign className="w-4 h-4" />
+                      </button>
+                    </div>
+                  </div>
+
+                  {/* Text Meta Container */}
+                  <div className="p-3.5 flex-1 flex flex-col justify-between" id={`movie-meta-${movie.id}`}>
+                    <div>
+                      <h3 className="text-xs font-bold text-gray-900 dark:text-gray-100 group-hover:text-indigo-600 dark:group-hover:text-indigo-400 transition-colors truncate" title={movie.titleFa}>
+                        {movie.titleFa}
+                      </h3>
+                      <p className="text-[10px] text-gray-455 font-mono truncate mt-0.5">{movie.titleEn}</p>
+                      
+                      <div className="flex items-center gap-1.5 flex-wrap mt-2">
+                        <span className="text-[9px] bg-gray-50 text-gray-455 border border-gray-100 dark:bg-gray-800/50 dark:text-gray-300 dark:border-gray-700 px-1 py-0.5 rounded font-mono font-medium shrink-0">
+                          {movie.quality}
+                        </span>
+                        <span className="text-[9px] bg-gray-50 text-gray-455 border border-gray-100 dark:bg-gray-800/10 dark:text-gray-300 dark:border-gray-700 px-1 py-0.5 rounded truncate max-w-[90px]">
+                          {movie.subtitle}
+                        </span>
+                      </div>
+                    </div>
+
+                    <div className="border-t border-gray-100 dark:border-gray-800/60 mt-3 pt-3 flex items-center justify-between">
+                      <span className="text-[10px] opacity-75 font-medium font-mono text-gray-500">{toPersianNums(movie.year)}</span>
+                      <div className="flex items-center gap-1.5">
+                        <p className="text-xs font-bold text-emerald-600 font-mono">{formatCurrency(movie.salePrice || dbService.getSettings().defaultMoviePrice)}</p>
+                        <button
+                          onClick={(e) => { e.stopPropagation(); handleOpenSale(movie, e); }}
+                          className="flex items-center gap-1 bg-emerald-600 hover:bg-emerald-500 text-white text-[10px] font-bold px-2 py-1 rounded transition-all shadow-sm shrink-0"
+                          title="ثبت و صدور سریع فاکتور فروش برای این فیلم"
+                        >
+                          <Plus className="w-2.5 h-2.5" />
+                          <span>فروش</span>
+                        </button>
+                      </div>
+                    </div>
+                  </div>
+
+                  {/* Operations Footer (Edit/Delete icons) */}
+                  <div className="bg-gray-50 dark:bg-[#1a2236]/30 px-3 py-1.5 flex justify-between items-center border-t border-gray-150 dark:border-slate-800" id={`movie-footer-${movie.id}`}>
+                    {movie.officialSite ? (
+                      <button
+                        onClick={(e) => { e.stopPropagation(); setActiveBrowserUrl(movie.officialSite); }}
+                        className="flex items-center gap-1 text-[9px] font-semibold text-amber-500 hover:text-amber-600 hover:bg-amber-500/10 px-1.5 py-0.5 rounded transition-all"
+                        title="مشاهده سایت مراجع و مشخصات در مرورگر سینمایی"
+                      >
+                        <Globe className="w-3 h-3" />
+                        <span>سایت مرجع</span>
+                      </button>
+                    ) : (
+                      <span className="text-[9px] text-gray-400 italic">آدرس مرجع ندارد</span>
+                    )}
+                    <div className="flex gap-1.5">
+                      <button
+                        onClick={(e) => handleOpenEdit(movie, e)}
+                        className="p-1 text-gray-455 hover:text-indigo-650 transition-colors"
+                        title="ویرایش فیلم"
+                        id={`edit-movie-${movie.id}`}
+                      >
+                        <Edit className="w-3.5 h-3.5" />
+                      </button>
+                      <button
+                        onClick={(e) => handleDeleteMovie(movie.id, e)}
+                        className="p-1 text-gray-455 hover:text-red-650 transition-colors"
+                        title="حذف فیلم"
+                        id={`delete-movie-${movie.id}`}
+                      >
+                        <Trash2 className="w-3.5 h-3.5" />
+                      </button>
+                    </div>
                   </div>
                 </div>
-              </div>
-
-              {/* Operations Footer (Edit/Delete icons) */}
-              <div className="bg-gray-50 dark:bg-[#1a2236]/30 px-3 py-1.5 flex justify-between items-center border-t border-gray-150 dark:border-slate-800" id={`movie-footer-${movie.id}`}>
-                {movie.officialSite ? (
-                  <button
-                    onClick={(e) => { e.stopPropagation(); setActiveBrowserUrl(movie.officialSite); }}
-                    className="flex items-center gap-1 text-[9px] font-semibold text-amber-500 hover:text-amber-600 hover:bg-amber-500/10 px-1.5 py-0.5 rounded transition-all"
-                    title="مشاهده سایت مراجع و مشخصات در مرورگر سینمایی"
-                  >
-                    <Globe className="w-3 h-3" />
-                    <span>سایت مرجع</span>
-                  </button>
-                ) : (
-                  <span className="text-[9px] text-gray-400 italic">آدرس مرجع ندارد</span>
-                )}
-                <div className="flex gap-1.5">
-                  <button
-                    onClick={(e) => handleOpenEdit(movie, e)}
-                    className="p-1 text-gray-455 hover:text-indigo-650 transition-colors"
-                    title="ویرایش فیلم"
-                    id={`edit-movie-${movie.id}`}
-                  >
-                    <Edit className="w-3.5 h-3.5" />
-                  </button>
-                  <button
-                    onClick={(e) => handleDeleteMovie(movie.id, e)}
-                    className="p-1 text-gray-455 hover:text-red-650 transition-colors"
-                    title="حذف فیلم"
-                    id={`delete-movie-${movie.id}`}
-                  >
-                    <Trash2 className="w-3.5 h-3.5" />
-                  </button>
-                </div>
-              </div>
-            </div>
-          ))}
+              );
+            })}
         </div>
       ) : (
         <div className="overflow-x-auto bg-white dark:bg-[#1e293b] border border-gray-150 dark:border-slate-800 rounded-xl shadow-sm animate-scaleIn" id="movies-list-table-container">

@@ -47,5 +47,11 @@ contextBridge.exposeInMainWorld('electronAPI', {
   onDownloadProgress: (callback) => {
     ipcRenderer.removeAllListeners('download-progress');
     ipcRenderer.on('download-progress', (event, data) => callback(data));
+  },
+  downloadInternetFile: (taskId, url, destPath, options) => ipcRenderer.invoke('download-internet-file', { taskId, url, destPath, options }),
+  cancelDownloadFile: (taskId) => ipcRenderer.invoke('cancel-download-file', taskId),
+  onDownloadTaskProgress: (callback) => {
+    ipcRenderer.removeAllListeners('download-task-progress');
+    ipcRenderer.on('download-task-progress', (event, data) => callback(data));
   }
 });

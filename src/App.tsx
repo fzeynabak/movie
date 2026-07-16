@@ -15,6 +15,7 @@ import Downloads from './pages/Downloads';
 import SalesPage from './pages/Sales';
 import SettingsPage from './pages/Settings';
 import ContactUs from './pages/ContactUs';
+import NewMedia from './pages/NewMedia';
 import AuthScreen from './components/AuthScreen';
 import DBLogger from './components/DBLogger';
 import CartBar from './components/CartBar';
@@ -41,7 +42,8 @@ import {
   Square,
   Lock,
   LogOut,
-  Download
+  Download,
+  TrendingUp
 } from 'lucide-react';
 
 export default function App() {
@@ -59,7 +61,7 @@ export default function App() {
 
   const [isLoggedIn, setIsLoggedIn] = useState<boolean>(() => localStorage.getItem('parstech_user_logged_in') === 'true');
   const [sqliteActive, setSqliteActive] = useState<boolean>(() => dbService.getSqliteConnected());
-  const [activeTab, setActiveTab] = useState<'dashboard' | 'movies' | 'series' | 'sales' | 'settings' | 'contact' | 'dbtest'>('dashboard');
+  const [activeTab, setActiveTab] = useState<'dashboard' | 'movies' | 'series' | 'sales' | 'settings' | 'contact' | 'dbtest' | 'new-media'>('dashboard');
   const [appSettings, setAppSettings] = useState<AppSettings>(dbService.getSettings());
   const [localIps, setLocalIps] = useState<string[]>([]);
   const [showAboutModal, setShowAboutModal] = useState(false);
@@ -454,6 +456,15 @@ export default function App() {
       badge: 'سریال'
     },
     { 
+      id: 'new-media', 
+      label: 'فیلم و سریال‌های جدید', 
+      icon: TrendingUp,
+      activeClass: 'bg-gradient-to-r from-rose-500 to-amber-500 text-white shadow-lg shadow-rose-500/20',
+      iconColor: 'text-amber-500 dark:text-amber-400',
+      activeIconColor: 'text-white',
+      badge: 'جدید'
+    },
+    { 
       id: 'downloads', 
       label: 'مدیریت دانلودها (IDM)', 
       icon: Download,
@@ -774,6 +785,12 @@ export default function App() {
                 activeCustomer={currentCustomer ? { id: 'c1', name: currentCustomer, phone: '' } : null} 
                 initialSelectedId={activeMediaId}
                 onClearInitialSelectedId={() => setActiveMediaId(null)}
+              />
+            )}
+            {activeTab === 'new-media' && (
+              <NewMedia 
+                onGoToSettings={() => setActiveTab('settings')} 
+                onViewLocalMedia={handleViewMedia}
               />
             )}
             {activeTab === 'downloads' && <Downloads />}
